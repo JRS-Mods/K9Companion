@@ -5,6 +5,14 @@ By JRS.
 A K9 dog for SPT 4.1 that lives in your hideout and comes into raid with you, with its own trader (Dr. Yang), kennel
 upgrades, armoured gear and a K9 questline.
 
+![The dog in game, in its kennel room](images/in-game-kennel.jpg)
+
+| The DOG tab | Dr. Yang's shop |
+| --- | --- |
+| ![The DOG tab](images/dog-tab.jpg) | ![Dr. Yang's shop](images/trader.jpg) |
+
+![The K9 Kennel upgrades in the hideout](images/kennel-upgrades.jpg)
+
 Download the mod from its SPT Forge page or this repository's Releases. Everything about how it plays is in
 [K9Companion/README.md](K9Companion/README.md).
 
