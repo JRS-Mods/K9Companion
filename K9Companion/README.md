@@ -85,8 +85,6 @@ Hold Y as usual: the game's gesture menu has a **DOG** hexagon at the bottom of 
 | Go to bed | Hideout only, so not in the menu since 0.31.2 (there's no Y menu in the hideout): Shift+F7 there, or the DOG tab. An F-key still bound to it, or to the old Search and Fetch commands, is unbound when the game starts. |
 | Feed / Give water | Shows hunger or thirst. In a raid you hand over food or water (dog within 3 m); in the hideout these fill the dishes. |
 | Follow | Always. The dog follows you again (same as F7 from Stay). |
-| Search | In a raid. The dog goes to the nearest loot container around you (25 m) that it hasn't found yet and sits beside it. It never takes anything; you do. |
-| Fetch meds / Fetch food | In a raid. Aim where to look (or at your feet for round here, up to 80 m). The dog runs there, noses round 15 m for the nearest meds or food, and brings a loose one back in its mouth to drop at your feet. If there's only some inside a container, it sits by the container and barks. |
 
 While it follows you in a raid the dog also sniffs the loot round it (10 m, 2 m more per training level): something worth at least the **Valuable alert** price (config Search, 40,000 ₽, 0 = off), loose or in a container, gets one bark, a look its way and a message with what it is and where. Each find once a raid.
 
