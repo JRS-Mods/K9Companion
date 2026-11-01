@@ -316,10 +316,6 @@ Crouching/prone selects sneak movement and idle. Resting includes sitting, lying
 
 Dish levels are real and saved (see Hunger and thirst). Petting plays a dog response without animating player hands. Whistles, happy sounds and rare whining are local. Recorded sounds ship in `sounds` beside the DLL (`tools/convert_sounds.py` cuts and levels them): four barks (one picked at random), a whine, a shake (sometimes, when it gets up from lying), and breathing: a seamless loop of the panting, cleaned of its background noise, that plays all the time, heard only close by, quiet and slow at rest, softer asleep, harder and faster after a run or when it's hurt (Audio > Breathing volume, 0.35). Recorded and synthesized sounds are all levelled to the same loudness, and the recordings are denoised. Whistle and happy are synthesized unless whistle.wav / happy.wav are added; any sound can have takes named <name>_1.wav ... (16-bit PCM WAV, mono/stereo, 8–96 kHz, under 10 MB).
 
-## Build
-
-Run build.ps1 to build/package/install, or build.ps1 -NoInstall to package only. tools/export_unreal.py exports the clips and the root-motion gaits; tools/measure_gaits.py measures gait speeds; tools/convert_blender.py builds k9dog.dog; tools/validate_preview.py checks it (DOG_PREVIEW_CLIPS selects the poses to render).
-
 ## Moving the kennel
 
 With Hideout Extensions installed, right-click the kennel's paw icon on the hideout's overview and the kennel follows your mouse (R turns it; Shift+R a little); left-click puts it down where it fits, right-click cancels. A kennel put somewhere by hand stays there, even outside its room behind the emergency wall.
