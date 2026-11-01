@@ -119,7 +119,7 @@ public sealed class K9Quests(TemplateTable templates, TradersTable traders, Loca
         Handover("Hand over drinking water", DrinkingWater, 2, false);
         Handover("Hand over a medical kit", MedKits, 1, false);
         Pay(2500, 18000, .02);
-        GiveWeapon(6, "5448bd6b4bdc2dfc2f8b4569");
+        GiveWeapon("5448bd6b4bdc2dfc2f8b4569");
         Give(new MongoId("5448c12b4bdc2d02308b456f"), 1);
         Give(new MongoId("5448c12b4bdc2d02308b456f"), 1);
         GiveAmmo("573719762459775a626ccbc1", 48);
@@ -140,15 +140,15 @@ public sealed class K9Quests(TemplateTable templates, TradersTable traders, Loca
         string tag = Find("Find a K9 identification tag in raid (on scavs and PMCs, or in scav corpses, jackets and drawers on Customs)", K9Ids.K9Tag);
         Handover("Hand over the K9 identification tag", new[] { K9Ids.K9Tag.ToString() }, 1, true, tag);
         Pay(16500, 102000, .12);
-        GiveWeapon(5, "571a12c42459771f627b58a0");
+        GiveWeapon("571a12c42459771f627b58a0");
         Give(new MongoId("571a29dc2459771fb2755a6a"), 1);
         Give(new MongoId("571a29dc2459771fb2755a6a"), 1);
         GiveAmmo("573603562459776430731618", 64);
-        GiveWeapon(7, "5ea03f7400685063ec28bfa8");
+        GiveWeapon("5ea03f7400685063ec28bfa8");
         Give(new MongoId("5ea034eb5aad6446a939737b"), 1);
         Give(new MongoId("5ea034eb5aad6446a939737b"), 1);
         GiveAmmo("573602322459776445391df1", 140);
-        GiveWeapon(2, "574d967124597745970e7c94");
+        GiveWeapon("574d967124597745970e7c94");
         GiveAmmo("5656d7c34bdc2d9d198b4587", 60);
         yield return End("Completion", K9Ids.AnyMap,
             "Before the conflict the city's police kennel boarded its dogs with us. When the shooting started, the staff ran and the dogs scattered. One of them, Rex of unit seven, had a handler who went looking for him and never came back. " +
@@ -164,7 +164,7 @@ public sealed class K9Quests(TemplateTable templates, TradersTable traders, Loca
         string water = Leave("Stash drinking water in the ZB-016 bunker on Woods", DrinkingWater, "huntsman_005_1", 20);
         Survive("Survive and extract from Woods", "Woods", food, water);
         Pay(8500, 50000, .06);
-        GiveWeapon(0, "59d6088586f774275f37482f");
+        GiveWeapon("59d6088586f774275f37482f");
         Give(new MongoId("59d625f086f774661516605d"), 1);
         Give(new MongoId("59d625f086f774661516605d"), 1);
         Give(new MongoId("59d625f086f774661516605d"), 1);
@@ -194,13 +194,13 @@ public sealed class K9Quests(TemplateTable templates, TradersTable traders, Loca
         Counter("Give your dog the Sit command", K9Ids.TeethAndSteel, 4);
         Counter("Call your dog with Come here", K9Ids.TeethAndSteel, 5);
         Pay(28500, 185000, .18);
-        GiveWeapon(8, "5bfd297f0db834001a669119");
+        GiveWeapon("5bfd297f0db834001a669119");
         GiveAmmo("5887431f2459777e1612938f", 40);
-        GiveWeapon(9, "5c46fbd72e2216398b5a8c9c");
+        GiveWeapon("5c46fbd72e2216398b5a8c9c");
         Give(new MongoId("5c471c442e221602b542a6f8"), 1);
         Give(new MongoId("5c471c442e221602b542a6f8"), 1);
         GiveAmmo("5887431f2459777e1612938f", 60);
-        GiveWeapon(1, "59ff346386f77477562ff5e2");
+        GiveWeapon("59ff346386f77477562ff5e2");
         Give(new MongoId("5a01c29586f77474660c694c"), 1);
         Give(new MongoId("5a01c29586f77474660c694c"), 1);
         Give(new MongoId("5a01c29586f77474660c694c"), 1);
@@ -230,10 +230,10 @@ public sealed class K9Quests(TemplateTable templates, TradersTable traders, Loca
         Handover("Hand over the K9 veterinary kit", new[] { K9Ids.VetKit.ToString() }, 1, true, vet);
         Handover("Hand over medical kits", MedKits, 2, false);
         Pay(40000, 260000, .18);
-        GiveWeapon(3, "6513ef33e06849f06c0957ca");
+        GiveWeapon("6513ef33e06849f06c0957ca");
         Give(new MongoId("6513f0a194c72326990a3868"), 1);
         GiveAmmo("5656d7c34bdc2d9d198b4587", 200);
-        GiveWeapon(4, "64637076203536ad5600c990");
+        GiveWeapon("64637076203536ad5600c990");
         Give(new MongoId("646372518610c40fc20204e8"), 1);
         GiveAmmo("59e77a2386f7742ee578960a", 200);
         GivePlated(K9Ids.EliteHarness, "655746010177119f4a097ff7", "6557458f83942d705f0c4962");   // SAPI III+ and sides
@@ -514,8 +514,8 @@ public sealed class K9Quests(TemplateTable templates, TradersTable traders, Loca
     // (The veterinary kit, 5, is the only thing that heals the dog: it has to be there from the day you have one.)
     private static readonly int[] DogSupplyOffers = { 5, 9, 12, 13, 14, 26, 29, 0x35, 0x36 };
 
-    // One of Dr. Yang's import weapons (K9Shop: the copy of the game's weapon), built as the original's default preset.
-    private void GiveWeapon(int import, string original)
+    // One of the game's weapons, built as its default preset.
+    private void GiveWeapon(string original)
     {
         var originalId = new MongoId(original);
         Preset? preset = globals.ItemPresets.Values.FirstOrDefault(p => p.Encyclopedia == originalId && p.Items?.FirstOrDefault()?.Template == originalId)
@@ -528,7 +528,7 @@ public sealed class K9Quests(TemplateTable templates, TradersTable traders, Loca
         var items = new JsonArray();
         foreach (Item part in parts)
         {
-            var o = new JsonObject { ["_id"] = ids[part.Id], ["_tpl"] = part == parts[0] ? K9Ids.Weapon(import).ToString() : part.Template.ToString() };
+            var o = new JsonObject { ["_id"] = ids[part.Id], ["_tpl"] = part.Template.ToString() };
             if (part != parts[0] && part.ParentId != null && ids.TryGetValue(new MongoId(part.ParentId), out string? parent)) { o["parentId"] = parent; o["slotId"] = part.SlotId; }
             items.Add(o);
         }

@@ -12,32 +12,28 @@ using SPTarkov.Server.Core.Utils.Cloners;
 namespace K9Companion.Server;
 
 /// <summary>
-/// The rest of Dr. Yang's shelves: the game's own care items and Asian-styled gear, and his Asian import weapons.
-/// The game has no Chinese or Korean firearms of its own, so the weapons are the licence-built copies China and North
-/// Korea made of Soviet designs the game does have (Type 56 = AKM, SKS and RPD, Type 54 = TT, ...): each is a clone of
-/// that weapon, with its model, parts and magazines, its own name, the original's presets (so the flea market can offer
-/// builds of it) and the original's weapon mastery. Every server start Dr. Yang customises his builds a little: grips,
-/// muzzle devices, stocks and handguards are swapped at random for parts that fit and don't conflict.
-/// Everything is priced from the game's handbook, as vanilla traders are.
+/// The rest of Dr. Yang's shelves: the game's own care items and Asian-styled gear, and, with the WTT Content Backport
+/// installed, its Asian rifles (the QBZ-191 and the Howa Type 20) with their rounds and magazines. The rifles are copies
+/// of the builds WTT's own traders sell. Everything is priced from the game's handbook, as vanilla traders are.
 /// </summary>
 [Injectable(TypePriority = OnLoadOrder.Preload + 5)]
-public sealed class K9Shop(TradersTable traders, TemplateTable templates, GlobalTable globals, CustomItemService items, ICloner cloner,
-    LocaleTable locales, ISptLogger<K9Shop> logger) : IOnLoad
+public sealed class K9Shop(TradersTable traders, TemplateTable templates, GlobalTable globals, ICloner cloner, ISptLogger<K9Shop> logger) : IOnLoad
 {
-    private sealed record Import(string Original, string Name, string Short, string Origin, int Level, string About);
-
-    private static readonly Import[] Imports =
+    // The WTT Content Backport's Asian rifles: template, stock, loyalty level, offer number.
+    private static readonly (string Template, int Stock, int Level, int Offer)[] WttWeapons =
     {
-        new("59d6088586f774275f37482f", "Norinco Type 56 7.62x39 assault rifle", "Type 56", "China", 3, "China's licence-built AKM pattern, the PLA's rifle for a generation"),
-        new("59ff346386f77477562ff5e2", "Type 68 7.62x39 assault rifle", "Type 68", "North Korea", 4, "North Korea's copy of the folding-stock AKM"),
-        new("574d967124597745970e7c94", "Norinco Type 56 7.62x39 carbine", "Type 56 SKS", "China", 3, "China's copy of the SKS, made by the million"),
-        new("6513ef33e06849f06c0957ca", "Type 56 7.62x39 light machine gun", "Type 56 LMG", "China", 4, "China's copy of the RPD light machine gun"),
-        new("64637076203536ad5600c990", "Type 80 7.62x54R general-purpose machine gun", "Type 80", "China", 4, "China's copy of the PKM"),
-        new("571a12c42459771f627b58a0", "Norinco Type 54 7.62x25 pistol", "Type 54", "China", 3, "China's copy of the TT-33 service pistol"),
-        new("5448bd6b4bdc2dfc2f8b4569", "Type 59 9x18PM pistol", "Type 59", "China", 3, "China's copy of the Makarov PM"),
-        new("5ea03f7400685063ec28bfa8", "Type 50 7.62x25 submachine gun", "Type 50", "China", 3, "China's copy of the PPSh-41, used through the Korean War"),
-        new("5bfd297f0db834001a669119", "Type 53 7.62x54R bolt-action rifle", "Type 53", "China", 3, "China's copy of the Mosin-Nagant carbine"),
-        new("5c46fbd72e2216398b5a8c9c", "Norinco NDM-86 7.62x54R marksman rifle", "NDM-86", "China", 4, "Norinco's Dragunov-pattern marksman rifle (here on the SVDS)"),
+        ("69f9ebbcaae020b0db02f65d", 2, 3, 0x40),   // Norinco QBZ-191 5.8x42 assault rifle (China)
+        ("6a3bffbebc377285900b85cf", 2, 4, 0x41),   // Howa Type 20 5.56x45 assault rifle (Japan)
+    };
+
+    // Their rounds and magazines (the Type 20 takes the game's own STANAG magazines).
+    private static readonly (string Template, int Stock, int Level, int Offer)[] WttGoods =
+    {
+        ("69f9ec5a7596e93e340c0a1e", 6, 3, 0x50),   // QBZ-191 5.8x42 30-round magazine
+        ("6a42661705016139300b2085", 300, 3, 0x51), // 5.8x42mm DBX95
+        ("6a07208057b2695f9d001e63", 300, 3, 0x52), // 5.8x42mm DBP191
+        ("6a426637ddc63098d100ae67", 120, 4, 0x53), // 5.8x42mm DVX12
+        ("6a42662fcb506840dd053827", 120, 4, 0x54), // 5.8x42mm DVC12
     };
 
     // The game's own items Dr. Yang stocks: template, stock, loyalty level, offer number.
@@ -61,7 +57,7 @@ public sealed class K9Shop(TradersTable traders, TemplateTable templates, Global
         ("66bdc28a0b603c26902b2011", 1, 4, 30),    // DevTac Ronin ballistic helmet (with its plates)
         ("5b4329f05acfc47a86086aa1", 1, 4, 31),    // DevTac Ronin Respirator
 
-        // Ammunition and magazines for the imports.
+        // Ammunition and magazines for the Soviet-pattern guns the K9 quests give, and the Type 20's.
         ("59e4d3d286f774176a36250a", 300, 1, 0x60), // 7.62x39mm HP
         ("5656d7c34bdc2d9d198b4587", 300, 2, 0x61), // 7.62x39mm PS gzh
         ("59e0d99486f7744a32234762", 120, 4, 0x62), // 7.62x39mm BP gzh
@@ -83,6 +79,9 @@ public sealed class K9Shop(TradersTable traders, TemplateTable templates, Global
         ("5c471c442e221602b542a6f8", 3, 3, 0x72),   // SVD 10-round magazine
         ("6513f0a194c72326990a3868", 2, 4, 0x73),   // RPD Buben 100-round box
         ("646372518610c40fc20204e8", 2, 4, 0x74),   // PK 100-round box
+        ("54527a984bdc2d4e668b4567", 300, 3, 0x75), // 5.56x45mm M855
+        ("54527ac44bdc2d36668b4567", 120, 4, 0x76), // 5.56x45mm M855A1
+        ("55d4887d4bdc2d962f8b4570", 4, 3, 0x77),   // Colt AR-15 STANAG 30-round magazine
 
         // More medical and veterinary supplies.
         ("5e831507ea0a7c419c2f9bd9", 6, 1, 0x80),   // Esmarch tourniquet
@@ -103,20 +102,13 @@ public sealed class K9Shop(TradersTable traders, TemplateTable templates, Global
     };
 
     private const double Markup = 1.15;
-    private static readonly HashSet<string> Swappable = new() { "mod_pistol_grip", "mod_muzzle", "mod_stock", "mod_handguard" };
     private static readonly MongoId Yang = new("6a5d0c0c4fb9a3c5e1d0d0a0");
-    private readonly Random random = new();
-    // Each copied preset's id and the original preset it came from: a build's name suffix ("Short", "(AKMB)") is
-    // looked up by preset id, so the copies need the originals' text or the game shows the bare id.
-    private readonly Dictionary<string, string> presetNames = new();
 
     public Task OnLoadAsync(CancellationToken cancellationToken)
     {
         Trader? yang = traders.GetTrader(Yang);
-        if (yang?.Assort?.Items == null) { logger.Warning("[K9Companion] Dr. Yang isn't loaded; his import stock is skipped."); return Task.CompletedTask; }
-        int weapons = 0, goods = 0;
-        for (int n = 0; n < Imports.Length; n++)
-            if (CloneWeapon(n, out List<Item>? build)) { Add(yang.Assort, K9Ids.Offer(0x40 + n), build!, 2, Imports[n].Level); weapons++; }
+        if (yang?.Assort?.Items == null) { logger.Warning("[K9Companion] Dr. Yang isn't loaded; his shelves are skipped."); return Task.CompletedTask; }
+        int goods = 0, wtt = 0;
         foreach (var (template, stock, level, offer) in Goods)
         {
             var tpl = new MongoId(template);
@@ -124,103 +116,56 @@ public sealed class K9Shop(TradersTable traders, TemplateTable templates, Global
             Add(yang.Assort, K9Ids.Offer(offer), WithPreset(tpl), stock, level);
             goods++;
         }
-        foreach (var language in locales.Global.Values)
-            language.AddTransformer(data =>
-            {
-                if (data != null) foreach (var (copy, original) in presetNames) data[copy] = data.TryGetValue(original, out string? text) ? text : "";
-                return data;
-            });
-        logger.Info($"[K9Companion] Dr. Yang's imports: {weapons} Asian weapons (custom builds), {goods} care, gear, ammunition and magazine offers.");
+        // Only with the WTT Content Backport (its items and its traders' builds): without it these are left out quietly.
+        foreach (var (template, stock, level, offer) in WttWeapons)
+        {
+            List<Item>? build = TraderBuild(new MongoId(template));
+            if (build == null) continue;
+            Add(yang.Assort, K9Ids.Offer(offer), build, stock, level);
+            wtt++;
+        }
+        foreach (var (template, stock, level, offer) in WttGoods)
+        {
+            var tpl = new MongoId(template);
+            if (!templates.Items.ContainsKey(tpl)) continue;
+            Add(yang.Assort, K9Ids.Offer(offer), WithPreset(tpl), stock, level);
+            wtt++;
+        }
+        logger.Info($"[K9Companion] Dr. Yang's shelves: {goods} care, gear, ammunition and magazine offers" +
+                    (wtt > 0 ? $", and {wtt} WTT Content Backport offers (QBZ-191, Type 20 and their rounds)." : "; the WTT Content Backport's Asian rifles aren't installed."));
         return Task.CompletedTask;
     }
 
-    // ---- the weapons -----------------------------------------------------------------------------------------
-
-    private bool CloneWeapon(int n, out List<Item>? build)
+    // A built gun as another trader sells it (the WTT Content Backport gives its guns no preset): the first offer with
+    // that gun at its root, with everything fitted to it.
+    private List<Item>? TraderBuild(MongoId template)
     {
-        build = null;
-        Import w = Imports[n];
-        var original = new MongoId(w.Original);
-        MongoId id = K9Ids.Weapon(n);
-        if (!templates.Items.TryGetValue(original, out TemplateItem? source)) { logger.Warning($"[K9Companion] {w.Name}: its original {w.Original} isn't in this game version."); return false; }
-        string handbook = templates.Handbook.Items.FirstOrDefault(h => h.Id == original)?.ParentId.ToString() ?? "5b5f78e986f77447ed5636b1";
-        var result = items.CreateItemFromClone(new NewItemFromCloneDetails
+        foreach (Trader trader in traders.Values)
         {
-            ItemTplToClone = original, NewId = id, ParentId = source.Parent, NewItemName = "k9companion_" + w.Short.ToLowerInvariant().Replace(' ', '_'),
-            HandbookParentId = handbook, HandbookPriceRoubles = (int)Price(original), FleaPriceRoubles = (int)Price(original),
-            Locales = new Dictionary<string, LocaleDetails>
-            {
-                ["en"] = new() { Name = w.Name, ShortName = w.Short,
-                    Description = $"{w.About} ({w.Origin}). It uses the original's model, parts and magazines. From Dr. Yang's Asian import stock." }
-            }
-        });
-        if (result.Success != true) { logger.Error($"[K9Companion] Couldn't create {w.Name}: " + string.Join("; ", result.Errors ?? new List<string>())); return false; }
-
-        // The original's mastery counts for the copy too.
-        foreach (var mastering in globals.Configuration.Mastering.Where(m => m.Templates.Contains(original)))
-            mastering.Templates = mastering.Templates.Append(id).ToList();
-
-        // The original's presets, as the copy's (the default one shows in the handbook; all of them feed the flea market).
-        var presets = globals.ItemPresets.Values.Where(p => p.Items?.FirstOrDefault()?.Template == original).Take(5).ToList();
-        for (int k = 0; k < presets.Count; k++)
-        {
-            Preset p = presets[k];
-            var map = p.Items.Take(40).Select((item, i) => (item.Id, New: new MongoId(K9Ids.Make(9, n, k * 40 + i)))).ToDictionary(x => x.Id, x => x.New);
-            var copy = p.Items.Take(40).Select(item =>
-            {
-                Item c = cloner.Clone(item)!;
-                c.Id = map[item.Id];
-                if (item.ParentId != null && map.TryGetValue(new MongoId(item.ParentId), out MongoId parent)) c.ParentId = parent.ToString();
-                return c;
-            }).ToList();
-            copy[0].Template = id;
-            var presetId = new MongoId(K9Ids.Make(9, 0xf0 + n, k));
-            presetNames[presetId.ToString()] = p.Id.ToString();
-            globals.ItemPresets[presetId] = new Preset
-            {
-                Id = presetId, Type = "Preset", Name = $"{w.Short} {k + 1}", ChangeWeaponName = p.ChangeWeaponName,
-                Parent = copy[0].Id, Items = copy, Encyclopedia = p.Encyclopedia == original ? id : (MongoId?)null
-            };
+            List<Item>? stock = trader.Assort?.Items;
+            Item? root = stock?.FirstOrDefault(i => i.Template == template && i.ParentId == "hideout");
+            if (root == null) continue;
+            var build = new List<Item> { root };
+            for (int n = 0; n < build.Count; n++)
+                build.AddRange(stock!.Where(i => i.ParentId == build[n].Id.ToString()));
+            return Copy(build, template);
         }
-        if (presets.Count == 0) { logger.Warning($"[K9Companion] {w.Name} has no preset to build from; not stocked."); return true; }
-        build = Customise(presets[random.Next(presets.Count)].Items.Take(40).ToList(), id);
-        return true;
+        return null;
     }
 
-    // A copy of a preset with fresh ids, its root on the given template, and (for the imports) a few parts swapped at random.
-    private List<Item> Customise(List<Item> preset, MongoId root, bool swap = true)
+    // Items with fresh ids, kept fitted to each other, the root on the given template.
+    private List<Item> Copy(List<Item> items, MongoId root)
     {
-        var map = preset.ToDictionary(i => i.Id, _ => new MongoId());
-        var build = preset.Select(item =>
+        var map = items.ToDictionary(i => i.Id.ToString(), _ => new MongoId());
+        var build = items.Select(item =>
         {
             Item c = cloner.Clone(item)!;
-            c.Id = map[item.Id];
-            if (item.ParentId != null && map.TryGetValue(new MongoId(item.ParentId), out MongoId parent)) c.ParentId = parent.ToString();
+            c.Id = map[item.Id.ToString()];
+            if (item.ParentId != null && map.TryGetValue(item.ParentId, out MongoId parent)) c.ParentId = parent.ToString();
             return c;
         }).ToList();
         build[0].Template = root;
-        if (!swap) return build;
-        foreach (Item part in build.Skip(1).Where(p => Swappable.Contains(p.SlotId ?? "")).ToList())
-        {
-            if (random.NextDouble() > .6 || build.Any(i => i.ParentId == part.Id.ToString())) continue;   // only bare parts
-            Item? holder = build.FirstOrDefault(i => i.Id.ToString() == part.ParentId);
-            var slot = holder == null ? null : templates.Items.GetValueOrDefault(holder.Template)?.Properties?.Slots?.FirstOrDefault(s => s.Name == part.SlotId);
-            var others = build.Where(i => i != part).Select(i => i.Template).ToHashSet();
-            var fits = slot?.Properties?.Filters?.FirstOrDefault()?.Filter?.Where(t => t != part.Template && Fits(t, others)).ToList();
-            if (fits == null || fits.Count == 0) continue;
-            part.Template = fits[random.Next(fits.Count)];
-        }
         return build;
-    }
-
-    // A part that can stand on its own (needs nothing fitted to it), is a real model, and doesn't clash with the rest.
-    private bool Fits(MongoId template, HashSet<MongoId> others)
-    {
-        if (!templates.Items.TryGetValue(template, out TemplateItem? t) || t.Properties == null) return false;
-        if (t.Properties.QuestItem == true || string.IsNullOrEmpty(t.Properties.Prefab?.Path)) return false;
-        if (t.Properties.Slots?.Any(s => s.Required == true) == true) return false;
-        if (t.Properties.ConflictingItems?.Overlaps(others) == true) return false;
-        return !others.Any(o => templates.Items.GetValueOrDefault(o)?.Properties?.ConflictingItems?.Contains(template) == true);
     }
 
     // ---- offers -------------------------------------------------------------------------------------------
@@ -229,7 +174,7 @@ public sealed class K9Shop(TradersTable traders, TemplateTable templates, Global
     private List<Item> WithPreset(MongoId template)
     {
         Preset? preset = globals.ItemPresets.Values.FirstOrDefault(p => p.Encyclopedia == template && p.Items?.FirstOrDefault()?.Template == template);
-        return preset != null ? Customise(preset.Items.ToList(), template, swap: false) : new List<Item> { new() { Id = new MongoId(), Template = template } };
+        return preset != null ? Copy(preset.Items.ToList(), template) : new List<Item> { new() { Id = new MongoId(), Template = template } };
     }
 
     private void Add(TraderAssort assort, MongoId offer, List<Item> build, int stock, int level)

@@ -43,8 +43,6 @@ public static class K9Ids
         TrainingKit = Template(0x15), TacticalCollar = Template(0x16);
     // The other two collars (the tactical collar is the third): the dog wears one in its collar slot (DogGear.Collars).
     public static readonly MongoId TrainingCollar = Template(0x17), BlackCollar = Template(0x18);
-    // Licence-built Asian copies of the game's own weapons (K9Shop): Template(0x40 + n).
-    public static MongoId Weapon(int n) => Template(0x40 + n);
 
     // ---- the kennel: three improvements of the hideout's Rest Space ---------------------------------------------
     public static readonly MongoId[] Kennel = { new(Make(7, 0, 1)), new(Make(7, 0, 2)), new(Make(7, 0, 3)) };

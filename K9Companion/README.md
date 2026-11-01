@@ -227,8 +227,8 @@ Dr. Yang has four loyalty levels. The questline's standing reaches LL2 by Trust 
 | --- | --- |
 | LL1 | Dog food and meat (bulk after Strays of Tarkov), water, K9 training treats (15% hunger), K9 training collar (Coyote), army and aseptic bandages, fleece fabric (after Learning the Ropes) |
 | LL2 | K9 lightweight harness, K9 training collar (Black), K9 fleece bed liner and thermal dog bed (bed upgrades), K9 training kit, ripstop fabric, car first aid kits, Salewa |
-| LL3 | Armour classes 2-3 (basic and reinforced jackets), K9 veterinary kit (2x1, for the dog only: using it, or its quick slot key, treats the dog), IFAK, AFAK, repair materials (Cordura, aramid, KEKTAPE), **Asian imports**: Type 56 rifle and carbine, Type 54, Type 59, Type 50, Type 53; Type 56 Chicom chest harness, Samurai Menpo masks, the Korean-made SGM 50-round Glock drum |
-| LL4 | Armour classes 4-5 (tactical vest, elite assault vest), K9 premium dog food (100% hunger), Grizzly, Surv12, K9 tactical collar, **Asian imports**: Type 68, Type 56 LMG, Type 80, NDM-86; DevTac Ronin helmet and respirator |
+| LL3 | Armour classes 2-3 (basic and reinforced jackets), K9 veterinary kit (2x1, for the dog only: using it, or its quick slot key, treats the dog), IFAK, AFAK, repair materials (Cordura, aramid, KEKTAPE), **with the WTT Content Backport**: Norinco QBZ-191 rifle, its magazine and 5.8x42 DBX95/DBP191; Type 56 Chicom chest harness, Samurai Menpo masks, the Korean-made SGM 50-round Glock drum |
+| LL4 | Armour classes 4-5 (tactical vest, elite assault vest), K9 premium dog food (100% hunger), Grizzly, Surv12, K9 tactical collar, **with the WTT Content Backport**: Howa Type 20 rifle, 5.8x42 DVX12/DVC12; DevTac Ronin helmet and respirator |
 
 Some of these also need a quest first: the dog's supplies (Trust Is Earned), Cordura and aramid (Teeth and Steel). The harnesses go by loyalty level alone, one per level, bigger ones higher up. His offers also show on the flea market.
 
@@ -259,30 +259,13 @@ The goggles and headset are fitted to the dog's skull (lens over the eyes, strap
 
 The harnesses are real models (decimated from about two million triangles each to 9,000 (collars 3,000), fitted to the dog, snugged down onto its fur (pouches and handles keep their height) and skinned to its skeleton in Blender by `tools/convert_gear.py`; icons by `tools/render_gear_icons.py`). Since 0.21 they replace the six coloured jackets: each took over one old jacket's item (so quests, offers and saved gear carry on), and the two left over (hi-vis basic jacket, coyote heavy armour) become the pocket vest and the assault vest when the game starts, with whatever's inside them.
 
-### Asian imports
+### Asian rifles (WTT Content Backport)
 
-The game has no Chinese or Korean firearms of its own, so Dr. Yang's are the licence-built copies China and North Korea made of Soviet designs the game does have. Each is its own item (name, description, flea listings), built on the original's model, parts, magazines and weapon mastery:
-
-| Weapon | Copy of | Origin |
-| --- | --- | --- |
-| Norinco Type 56 assault rifle | AKM | China |
-| Type 68 assault rifle | AKMS | North Korea |
-| Norinco Type 56 carbine | SKS | China |
-| Type 56 light machine gun | RPD | China |
-| Type 80 general-purpose machine gun | PKM | China |
-| Norinco Type 54 pistol | TT-33 | China |
-| Type 59 pistol | Makarov PM | China |
-| Type 50 submachine gun | PPSh-41 | China |
-| Type 53 bolt-action rifle | Mosin | China |
-| Norinco NDM-86 marksman rifle | SVDS (the game has no plain SVD) | China |
-
-Dr. Yang sells each as a build: one of the original's presets, with the grip, muzzle device, stock or handguard swapped at random (a part that fits and doesn't conflict) each time the server starts. The copies get all the original's presets, so the flea market lists builds of them too. Prices follow the game's handbook, as vanilla traders do. There is no Chinese body armour in the game, so the Asian gear is what exists: the Type 56 Chicom harness, the Japanese-styled DevTac Ronin helmet and respirator, Samurai Menpo masks and the Korean-made Glock drum.
+With the WTT Content Backport installed, Dr. Yang also sells its two Asian rifles, built as WTT's own traders sell them: the **Norinco QBZ-191** (China, 5.8x42) at LL3 and the **Howa Type 20** (Japan, 5.56x45) at LL4, with the QBZ-191's magazine and the 5.8x42 rounds. Without it they're simply not on his shelves. There is no Chinese body armour in the game, so the Asian gear is what exists: the Type 56 Chicom harness, the Japanese-styled DevTac Ronin helmet and respirator, Samurai Menpo masks and the Korean-made Glock drum.
 
 ### Ammunition, magazines and medical stock
 
-To feed the imports he also sells their ammunition (7.62x39 HP/PS/BP, 7.62x25 TT LRNPC/Pst, 9x18 PM P/PBM, 7.62x54R T-46M/LPS/PS) and magazines (AK 10- and 30-round and 6L10, TT-105, PM, PPSh 35-round and 71-round drum, Mosin, SVD, RPD 100-round box, PK 100-round box), and more medical and veterinary supplies: Esmarch and CAT tourniquets, Analgin, Ibuprofen, Augmentin, Zagustin, morphine, a CMS kit, syringes, saline, hydrogen peroxide, Aquapeps, medical tools, a bloodset and an ophthalmoscope. Better rounds and bigger magazines unlock at higher loyalty. All are the game's own items at handbook price plus 15%.
-
-A build's name suffix (such as "Short" or "(AKMB)") comes from the preset it's built on; the imports' presets carry their originals' suffixes, so no build shows a bare preset id.
+For the guns the K9 quests give he also sells their ammunition (7.62x39 HP/PS/BP, 7.62x25 TT LRNPC/Pst, 9x18 PM P/PBM, 7.62x54R T-46M/LPS/PS) and magazines (AK 10- and 30-round and 6L10, TT-105, PM, PPSh 35-round and 71-round drum, Mosin, SVD, RPD 100-round box, PK 100-round box), 5.56x45 M855/M855A1 and STANAG magazines for the Type 20, and more medical and veterinary supplies: Esmarch and CAT tourniquets, Analgin, Ibuprofen, Augmentin, Zagustin, morphine, a CMS kit, syringes, saline, hydrogen peroxide, Aquapeps, medical tools, a bloodset and an ophthalmoscope. Better rounds and bigger magazines unlock at higher loyalty. All are the game's own items at handbook price plus 15%.
 
 ### Dog supplies
 
