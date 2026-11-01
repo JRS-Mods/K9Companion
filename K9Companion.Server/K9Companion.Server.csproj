@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>K9Companion.Server</AssemblyName>
+    <Authors>JRS</Authors>
+    <Company>JRS</Company>
+    <Copyright>Copyright © 2026 JRS</Copyright>
+    <RootNamespace>K9Companion.Server</RootNamespace>
+    <Version>1.0.0</Version>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DebugType>none</DebugType>
+    <SPTPath Condition="'$(SPTPath)' == ''">F:\SPT</SPTPath>
+    <Runtime>$(SPTPath)\SPT_Runtime</Runtime>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="SPTarkov.DI" HintPath="$(Runtime)\SPTarkov.DI.dll" Private="false" />
+    <Reference Include="SPTarkov.Server.Core" HintPath="$(Runtime)\SPTarkov.Server.Core.dll" Private="false" />
+    <Reference Include="SPTarkov.Common" HintPath="$(Runtime)\SPTarkov.Common.dll" Private="false" />
+    <Reference Include="SPTarkov.Reflection" HintPath="$(Runtime)\SPTarkov.Reflection.dll" Private="false" />
+    <Reference Include="SemanticVersioning" HintPath="$(Runtime)\SemanticVersioning.dll" Private="false" />
+    <Reference Include="0Harmony" HintPath="$(Runtime)\0Harmony.dll" Private="false" />
+  </ItemGroup>
+
+</Project>

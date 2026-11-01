@@ -1,0 +1,9 @@
+bin/
+obj/
+dist/
+work/
+cache/
+.vs/
+*.user
+*.zip
+K9Companion/assets/
