@@ -13,6 +13,10 @@ upgrades, armoured gear and a K9 questline.
 
 ![The K9 Kennel upgrades in the hideout](images/kennel-upgrades.jpg)
 
+| Settings (F12) | |
+| --- | --- |
+| ![The settings in F12](images/config-1.jpg) | ![More settings](images/config-2.jpg) |
+
 Download the mod from its SPT Forge page or this repository's Releases. Everything about how it plays is in
 [K9Companion/README.md](K9Companion/README.md).
 
