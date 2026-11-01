@@ -26,15 +26,6 @@ Download the mod from its SPT Forge page or this repository's Releases. Everythi
 | `K9Companion.Server` | The SPT server mod: Dr. Yang, the items, the questline, the kennel levels and the dog's saved data. |
 | `K9Companion.Fika` | The Fika link, loaded only when Fika is installed. |
 
-## Building
-
-You need the .NET SDK and an SPT 4.1 install (default `F:\SPT`; pass `-SPTPath` to use another).
-
-1. Copy `BepInEx/plugins/K9Companion` from the release zip into `K9Companion/assets`. It holds the dog's model,
-   textures and sounds, which aren't in this repository (see LICENSE.txt).
-2. Run `K9Companion/build.ps1 -NoInstall` to build all three parts and pack `K9Companion/dist/K9Companion-<version>.zip`,
-   or without `-NoInstall` to install into your SPT folder as well.
-
 ## Licence
 
 The code is MIT (LICENSE.txt). The dog's model, animations, textures, sounds and the item models are licensed assets
