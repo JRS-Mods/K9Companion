@@ -16,7 +16,7 @@ namespace K9Companion
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id = "jrs.k9companion";
-        public const string Version = "1.0.0";
+        public const string Version = "1.1.0";
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> Active, CombatMode, SurvivalNeeds, AutoFeedInHideout, CarryOverInjuries;
         internal static ConfigEntry<DogApproach> ApproachMode;
@@ -164,6 +164,7 @@ namespace K9Companion
             PatchFeature("rename dialog", RenameDialog.PatchInput);
             PatchFeature("DOG gesture menu", DogMenu.Patch);
             PatchFeature("dog jacket raid trip", DogBag.Patch);
+            PatchFeature("the map's navmesh on a Fika client", DogNavMesh.Patch);
             PatchFeature("dog gear (jacket slot and icons)", DogGearPatches.Patch);
             PatchFeature("dog interactions (interact key, right-click feeding)", DogInteraction.Patch);
             PatchFeature("dog on the raid screen", DogLobby.Patch);

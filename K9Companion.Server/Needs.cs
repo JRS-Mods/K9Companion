@@ -106,7 +106,7 @@ public sealed class NeedsRouter(JsonUtil json, NeedsKeeper keeper) : StaticRoute
 
 /// <summary>
 /// The dog's two new foods: canned dog food and a pack of dog meat (raw meat for dogs). Both are clones of vanilla
-/// rations, so they use those items' models and icons; they are sold by Dr. Yang (see DrYang.cs).
+/// rations; they are sold by Dr. Yang (see DrYang.cs) and found in raids (DogFoodInRaids).
 /// </summary>
 [Injectable(TypePriority = OnLoadOrder.Preload + 1)]
 public sealed class DogFoodItems(CustomItemService items, TemplateTable templates, ISptLogger<DogFoodItems> logger) : IOnLoad
@@ -118,9 +118,11 @@ public sealed class DogFoodItems(CustomItemService items, TemplateTable template
     public Task OnLoadAsync(CancellationToken cancellationToken)
     {
         Create(new MongoId("57347d7224597744596b4e72"), DogFood, "k9companion_dog_food", DogFoodPrice,
-            "Can of dog food", "Dog food", "Canned dog food (55% hunger for your dog). Feed it from the DOG group of the Y menu, or put it in the hideout food bowl.");
+            "Can of dog food", "Dog food", "Canned dog food (55% hunger for your dog). Feed it from the DOG group of the Y menu, or put it in the hideout food bowl. " +
+            "Found wherever tinned beef is, and scavs carry it. You can eat it yourself, but it does you little good and leaves you thirsty.");
         Create(new MongoId("65815f0e647e3d7246384e14"), DogMeat, "k9companion_dog_meat", DogMeatPrice,
-            "Pack of dog meat", "Dog meat", "Raw meat portions for dogs (40% hunger for your dog). Cheaper than canned food.");
+            "Pack of dog meat", "Dog meat", "Raw meat portions for dogs (40% hunger for your dog). Cheaper than canned food. " +
+            "Found wherever dried beef is, and scavs carry it. People can eat it too, if they're desperate: very little energy, and a lot of thirst.");
         return Task.CompletedTask;
     }
 

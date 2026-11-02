@@ -94,7 +94,7 @@ Commands that can't be given right now are greyed out with the reason next to th
 
 The dog has hunger and thirst (100% = fine). Both drop slowly while you play: 8% and 12% per hour of raid by default (HungerDecayRate, ThirstDecayRate), half that while resting in the hideout, and not at all while the game is closed. They are saved in your SPT profile by the server mod (with a local copy beside the plugin), so they carry over between raids and restarts. Saved values are checked on both sides; anything broken falls back to a fed dog with empty dishes.
 
-**Food:** Can of dog food (55%) and Pack of dog meat (40%), both sold by Dr. Yang. Meat from other sources works too: Salty Dog beef sausage and large beef stew 35%, small beef stew 30%, Tarker dried meat 25%. **Water:** Bottle of water 60%, Aquamari 50%, Emergency Water Ration 40%, purified water canister 100%. Opened bottles count for what's left in them. Items are used up with the game's own discard, from the dog's saddlebag and your gear in a raid, or from your gear and stash in the hideout.
+**Food:** Can of dog food (55%) and Pack of dog meat (40%), both sold by Dr. Yang and found in raids: the can wherever large beef stew turns up and the meat wherever Tarker dried meat does, about as often (containers, loose, and in scavs' pockets, vests and bags). You can eat them yourself, but they do you little good: 15 and 10 energy, and 20 and 25 hydration lost (premium dog food 20/-20, treats 5/-10). Meat from other sources works too: Salty Dog beef sausage and large beef stew 35%, small beef stew 30%, Tarker dried meat 25%. **Water:** Bottle of water 60%, Aquamari 50%, Emergency Water Ration 40%, purified water canister 100%. Opened bottles count for what's left in them. Items are used up with the game's own discard, from the dog's saddlebag and your gear in a raid, or from your gear and stash in the hideout.
 
 - **In a raid:** use Feed or Give water in the DOG menu with the dog near you; it eats from your hand (the item is only used once it has actually eaten). If hunger or thirst drops below 20% it helps itself from its own saddlebag, never from your gear.
 - **In the hideout:** Feed / Give water (or Shift+F9 / Shift+F10 at the bed) fill the dishes. The dog goes to its dishes on its own when below 60%. With AutoFeedInHideout on, nearly empty dishes are topped up from your stash automatically.
@@ -134,6 +134,8 @@ Four pieces are custom models instead (`kennel_models.props`, cut down to a hide
 
 ## Dr. Yang (trader, server mod)
 
+Trader ID: `6a5d0c0c4fb9a3c5e1d0d0a0` (for other mods' configs; the trader is built in code, so there's no `base.json` to find it in).
+
 A new trader, Dr. Wei Yang, the clinic vet. He is unlocked from the start, sells in roubles, buys food and drink back at half value, and restocks every hour. Her offers also show on the flea market.
 
 | Item | Price | Stock per restock | |
@@ -170,13 +172,13 @@ Five quests from Dr. Yang, in order, then five repeatable contracts. Each needs 
 
 | # | Quest | Objectives | Rewards |
 | --- | --- | --- | --- |
-| 1 | A Man's Best Friend | Hand over 3 dog food (can or meat), 2 drinking water, 1 medical kit | 2,500 XP, 18,000 ₽, a weapon |
+| 1 | A Man's Best Friend | Hand over 3 dog food (can or meat), 2 drinking water, 1 medical kit, all found in raid | 2,500 XP, 18,000 ₽, a weapon |
 | 2 | The Missing Unit | Find and hand over a K9 identification tag (scavs, PMCs, Customs) | 16,500 XP, 102,000 ₽, weapons |
-| 3 | Trust Is Earned | Stash dog food and water in the ZB-016 bunker on Woods, then survive and extract | 8,500 XP, 50,000 ₽, **your dog** (new handlers), the kennel, a black collar |
+| 3 | Trust Is Earned | Stash found in raid dog food and water in the ZB-016 bunker on Woods, then survive and extract | 8,500 XP, 50,000 ₽, **your dog** (new handlers), the kennel, a black collar |
 | 4 | Teeth and Steel | Dog wears armour class 2+; survive 3 raids with it; 5 kills with it beside you; give Follow, Sit and Come here | 28,500 XP, 185,000 ₽, weapons, tactical collar, Cordura, aramid |
-| 5 | The Last Handler | Find and hand over the K9 unit insignia; find and hand over a K9 veterinary kit (Customs crack house); hand over 2 medical kits; complete 5 raids with your dog alive | 40,000 XP, 260,000 ₽, weapons, **elite harness** |
+| 5 | The Last Handler | Find and hand over the K9 unit insignia; find and hand over a K9 veterinary kit (Customs crack house); hand over 2 found in raid medical kits; complete 5 raids with your dog alive | 40,000 XP, 260,000 ₽, weapons, **elite harness** |
 
-All quests also raise your standing with Dr. Yang. Contracts (after The Last Handler): **Daily Rations** (5 dog food: 20,000 ₽), **Safe Return** (extract twice with the dog: 35,000 ₽), **Supply Run** (3 medical supplies: a K9 veterinary kit) every 24 hours; **Working Partnership** (5 raids with the dog: 100,000 ₽) and **The Pack** (10 dog food: a tactical armour jacket) every 7 days.
+Every item a quest or contract takes has to be found in raid: bought ones don't count. All quests also raise your standing with Dr. Yang. Contracts (after The Last Handler): **Daily Rations** (5 dog food: 20,000 ₽), **Safe Return** (extract twice with the dog: 35,000 ₽), **Supply Run** (3 medical supplies: a K9 veterinary kit) every 24 hours; **Working Partnership** (5 raids with the dog: 100,000 ₽) and **The Pack** (10 dog food: a tactical armour jacket) every 7 days.
 
 - The bunker objective uses the game's own zone (the ZB-016 bunker from Jaeger's "Thrifty"), so the game checks it itself.
 - Where to find the story items, found-in-raid: the **K9 tag** on 1 in 4 scavs and PMCs (any map), and on Customs in scav corpses, jacket pockets and drawers; the **insignia** on about 1 in 7 scavs and PMCs, or lying loose in the Customs Dorms; a **K9 veterinary kit** lying loose in the Customs crack house (most raids). A kit bought from Dr. Yang isn't found-in-raid, so it doesn't count.

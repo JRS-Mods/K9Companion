@@ -23,13 +23,17 @@ namespace K9Companion.Server;
 [Injectable(TypePriority = OnLoadOrder.Preload + 5)]
 public sealed class DogSettingsFile(ModHelper mods, ISptLogger<DogSettingsFile> logger) : IOnLoad
 {
-    private const string Defaults = """
+    // Other mods' configs ask for trader IDs, and Dr. Yang has no base.json (he's built in code), so his is noted here.
+    private static readonly string TraderLine = $"// Dr. Yang's trader ID, for other mods' configs: {DrYang.Id}";
+
+    private static readonly string Defaults = """
         {
           // K9 Companion: dog settings for everyone on this server (with Fika, everyone in the raid).
           // Saved changes count from each player's next raid; no restart needed.
           // null = each player keeps their own setting (F12 in game). Anything else is fixed for everyone.
+          {TraderLine}
 
-          "combatMode": null,        // true: dogs fight and can be hurt. false: dogs only follow, and can't be hurt.
+          "combatMode": null,       // true: dogs fight and can be hurt. false: dogs only follow, and can't be hurt.
           "aggression": null,        // "Passive" (attacks only on Over There), "Defensive" (also whoever attacks you or it), "Aggressive" (anything it detects).
           "approach": null,          // "Auto" (straight at anything close, stalks the rest), "Stealth" (works its way in out of sight), "Direct" (runs straight at it).
           "autoRushRange": null,     // 5 to 40: under Auto, how close an enemy has to be for a straight attack, in metres.
@@ -42,7 +46,7 @@ public sealed class DogSettingsFile(ModHelper mods, ISptLogger<DogSettingsFile> 
           "biteStagger": null,       // 0 to 3: seconds a bitten enemy is thrown off for.
           "dogHealth": null          // 30 to 1000: a dog's hit points.
         }
-        """;
+        """.Replace("{TraderLine}", TraderLine);
 
     private static readonly JsonDocumentOptions Reading = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
     private static readonly (string Key, double Min, double Max)[] Numbers =
@@ -70,6 +74,12 @@ public sealed class DogSettingsFile(ModHelper mods, ISptLogger<DogSettingsFile> 
     private void AddNewSettings()
     {
         string text = File.ReadAllText(FilePath);
+        int top = text.IndexOf("\"combatMode\"", StringComparison.Ordinal);
+        if (!text.Contains("trader ID") && top >= 0)
+        {
+            int start = text.LastIndexOf('\n', top) + 1;
+            text = text.Insert(start, new string(' ', top - start) + TraderLine + "\n\n");
+        }
         int at = text.IndexOf("\"engageDistance\"", StringComparison.Ordinal);
         if (!text.Contains("\"approach\"") && at >= 0)
         {

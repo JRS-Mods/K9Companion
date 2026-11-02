@@ -36,8 +36,10 @@ namespace K9Companion
             // In a raid the hideout can't be on screen: no looking (a search of the whole raid scene, over and over, is a
             // stall the hideout dog would cause from the background).
             if (Comfort.Common.Singleton<GameWorld>.Instantiated && !(Comfort.Common.Singleton<GameWorld>.Instance is HideoutGameWorld)) return false;
-            if ((hideoutScreen == null || !hideoutScreen.isActiveAndEnabled) && Time.unscaledTime >= nextScreenLook)
-            { nextScreenLook = Time.unscaledTime + 2f; hideoutScreen = FindObjectOfType<HideoutScreenRear>(); }
+            // Found once, switched off or not, and kept: looking only for an active one searched everything loaded every
+            // couple of seconds for as long as you were in the menus.
+            if (hideoutScreen == null && Time.unscaledTime >= nextScreenLook)
+            { nextScreenLook = Time.unscaledTime + 2f; hideoutScreen = FindObjectOfType<HideoutScreenRear>(true); }
             return hideoutScreen != null && hideoutScreen.isActiveAndEnabled;
         }
 

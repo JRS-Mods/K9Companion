@@ -101,6 +101,9 @@ public sealed class BotQuestItemsPatch : AbstractPatch
     [PatchPostfix]
     public static void Postfix(MongoId botId, BotGenerationDetails botGenerationDetails, BotBaseInventory botInventory)
     {
+        // Dog food a bot carries counts as found in raid, as Dr. Yang's quests want it (scav loot isn't, otherwise).
+        foreach (Item food in botInventory.Items ?? Enumerable.Empty<Item>())
+            if (DogFoodInRaids.IsDogFood(food.Template)) (food.Upd ??= new Upd()).SpawnedInSession = true;
         if (botGenerationDetails.IsPlayerScav || !(botGenerationDetails.IsPmc || botGenerationDetails.RoleLowercase is "assault" or "cursedassault" or "marksman")) return;
         foreach (var (template, chance) in K9Items.OnBots)
         {

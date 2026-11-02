@@ -115,9 +115,9 @@ public sealed class K9Quests(TemplateTable templates, TradersTable traders, Loca
     {
         // ---- 1 ------------------------------------------------------------------------------------------------
         Begin(K9Ids.ManBestFriend, "A Man's Best Friend", null, 1);
-        Handover("Hand over cans of dog food or packs of dog meat", DogFood, 3, false);
-        Handover("Hand over drinking water", DrinkingWater, 2, false);
-        Handover("Hand over a medical kit", MedKits, 1, false);
+        Handover("Hand over found in raid cans of dog food or packs of dog meat", DogFood, 3, true);
+        Handover("Hand over found in raid drinking water", DrinkingWater, 2, true);
+        Handover("Hand over a found in raid medical kit", MedKits, 1, true);
         Pay(2500, 18000, .02);
         GiveWeapon("5448bd6b4bdc2dfc2f8b4569");
         Give(new MongoId("5448c12b4bdc2d02308b456f"), 1);
@@ -126,7 +126,7 @@ public sealed class K9Quests(TemplateTable templates, TradersTable traders, Loca
         yield return End("Completion", K9Ids.AnyMap,
             "Since the evacuation half of Tarkov's pets and working dogs have gone feral, and the other half are starving in back yards, waiting for owners who aren't coming back. I stayed for them. You don't have to understand that, only help.\n\n" +
             "Before I can take in a single animal I need supplies: three tins of dog food, two bottles of clean water and a proper medical kit. Nothing fancy. Just enough that the next dog brought to my door doesn't die on the table. " +
-            "I sell the dog food myself, if you can't find any.",
+            "Find them out there, not in a shop: dog food turns up wherever tinned beef does, and scavs carry it.",
             "Bring them to the clinic. And don't open the tins on the way, I know what soldiers' rations taste like.",
             "That will keep a dog alive for a week. You have no idea how rare that is in this city. I'll remember it.");
 
@@ -160,8 +160,8 @@ public sealed class K9Quests(TemplateTable templates, TradersTable traders, Loca
 
         // ---- 3 ------------------------------------------------------------------------------------------------
         Begin(K9Ids.TrustIsEarned, "Trust Is Earned", K9Ids.MissingUnit, 12);
-        string food = Leave("Stash dog food in the ZB-016 bunker on Woods", DogFood, "huntsman_005_1", 20);
-        string water = Leave("Stash drinking water in the ZB-016 bunker on Woods", DrinkingWater, "huntsman_005_1", 20);
+        string food = Leave("Stash found in raid dog food in the ZB-016 bunker on Woods", DogFood, "huntsman_005_1", 20);
+        string water = Leave("Stash found in raid drinking water in the ZB-016 bunker on Woods", DrinkingWater, "huntsman_005_1", 20);
         Survive("Survive and extract from Woods", "Woods", food, water);
         Pay(8500, 50000, .06);
         GiveWeapon("59d6088586f774275f37482f");
@@ -228,7 +228,7 @@ public sealed class K9Quests(TemplateTable templates, TradersTable traders, Loca
         Unused();
         string vet = Find("Find a K9 veterinary kit in raid (in the crack house on Customs)", K9Ids.VetKit);
         Handover("Hand over the K9 veterinary kit", new[] { K9Ids.VetKit.ToString() }, 1, true, vet);
-        Handover("Hand over medical kits", MedKits, 2, false);
+        Handover("Hand over found in raid medical kits", MedKits, 2, true);
         Pay(40000, 260000, .18);
         GiveWeapon("6513ef33e06849f06c0957ca");
         Give(new MongoId("6513f0a194c72326990a3868"), 1);
@@ -248,7 +248,7 @@ public sealed class K9Quests(TemplateTable templates, TradersTable traders, Loca
 
         // ---- contracts ----------------------------------------------------------------------------------------
         Begin(K9Ids.DailyRations, "Daily Rations", K9Ids.LastHandler, 1);
-        Handover("Hand over cans of dog food or packs of dog meat", DogFood, 5, false);
+        Handover("Hand over found in raid cans of dog food or packs of dog meat", DogFood, 5, true);
         Pay(3000, 20000, .01);
         GiveAmmo("5656d7c34bdc2d9d198b4587", 60);
         yield return End("Completion", K9Ids.AnyMap,
@@ -264,7 +264,7 @@ public sealed class K9Quests(TemplateTable templates, TradersTable traders, Loca
             "Both of you, both times.", "Good. That's the job, really. Everything else is detail.");
 
         Begin(K9Ids.SupplyRun, "Supply Run", K9Ids.LastHandler, 1);
-        Handover("Hand over medical supplies (bloodsets, saline, medical tools, syringes or ophthalmoscopes)", VetSupplies, 3, false);
+        Handover("Hand over found in raid medical supplies (bloodsets, saline, medical tools, syringes or ophthalmoscopes)", VetSupplies, 3, true);
         Pay(2000, 0, .01);
         Give(K9Ids.VetKit, 1);
         yield return End("Completion", K9Ids.AnyMap,
@@ -281,7 +281,7 @@ public sealed class K9Quests(TemplateTable templates, TradersTable traders, Loca
             "Five raids. Steady.", "A week of good work. Here's a week of pay.");
 
         Begin(K9Ids.ThePack, "The Pack", K9Ids.LastHandler, 1);
-        Handover("Hand over cans of dog food or packs of dog meat", DogFood, 10, false);
+        Handover("Hand over found in raid cans of dog food or packs of dog meat", DogFood, 10, true);
         Pay(4000, 0, .02);
         GivePlated(new MongoId("6a5d0c0c4fb9a3c5e1d0d071"), "656fa25e94b480b8a500c0e0");   // K9 Tactical Vest (Olive), KA Titan plates
         yield return End("Completion", K9Ids.AnyMap,
@@ -399,7 +399,7 @@ public sealed class K9Quests(TemplateTable templates, TradersTable traders, Loca
 
     private string Leave(string description, string[] targets, string zone, int seconds)
     {
-        var fields = ItemFields(targets, 1, false);
+        var fields = ItemFields(targets, 1, true);
         fields["maxDurability"] = 0; fields["zoneId"] = zone; fields["plantTime"] = seconds;
         return Objective("LeaveItemAtLocation", description, fields);
     }

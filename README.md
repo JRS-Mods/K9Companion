@@ -16,7 +16,9 @@ upgrades, armoured gear and a K9 questline.
 ![The settings in F12](images/config.webp)
 
 Download the mod from its SPT Forge page or this repository's Releases. Everything about how it plays is in
-[K9Companion/README.md](K9Companion/README.md).
+[K9Companion/README.md](K9Companion/README.md), and what changed in each version is in [CHANGELOG.md](CHANGELOG.md).
+
+Dr. Yang's trader ID, for other mods' configs: `6a5d0c0c4fb9a3c5e1d0d0a0`.
 
 ## What's here
 
