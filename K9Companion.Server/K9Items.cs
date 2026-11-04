@@ -2,13 +2,15 @@ using SPTarkov.Common.Models.Logging;
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.DI;
 using SPTarkov.Server.Core.Models.Common;
-using SPTarkov.Server.Core.Models.Eft.Common;
 using SPTarkov.Server.Core.Models.Eft.Common.Tables;
+using SPTarkov.Server.Core.Models.Eft.Common;
+using SPTarkov.Server.Core.Models.Enums;
 using SPTarkov.Server.Core.Models.Spt.Config;
 using SPTarkov.Server.Core.Models.Spt.Mod;
 using SPTarkov.Server.Core.Models.Spt.Tables;
 using SPTarkov.Server.Core.Models.Utils;
 using SPTarkov.Server.Core.Services.Modding.Custom;
+using SPTarkov.Server.Core.Utils.Cloners;
 
 namespace K9Companion.Server;
 
@@ -253,3 +255,456 @@ public sealed class K9Items(CustomItemService items, TemplateTable templates, Lo
     };
 }
 
+/// <summary>
+/// The dog's gear. Its jacket is a container (it carries what the old saddlebag did): one of five harnesses (a chest rig
+/// and four vests); Dr. Yang sells the vests only ready plated (also on the flea market, through his offers). Goggles go on its head, and a clip-on
+/// action camera on its jacket. What the dog is wearing sits in the slots of a hidden "dog" item kept in the profile's
+/// quest stash, which the DOG tab shows like the gear screen shows your own slots.
+/// </summary>
+public static class DogGear
+{
+    // The black jacket keeps the old saddlebag's id, so saddlebags already in a stash become black harnesses.
+    public static readonly MongoId Black = new("6a5d0c0c4fb9a3c5e1d0d061");
+
+    /// <summary>One jacket: a tier of protection with its own look (the client's gear_&lt;look&gt; model and icon_&lt;look&gt;
+    /// icon). Armour class 0 = none; the client applies the armour and the speed penalty to the dog (DogArmour there,
+    /// same table). Plates fitted in it take a round first where they cover; its own armour is the rest.
+    /// Plates: how many armour plates it takes (0, 2 front and back, 4 with the sides), the game's own plates.</summary>
+    public sealed record Jacket(MongoId Id, string Look, string Kind, string Short, int ArmourClass, int Width, int Height,
+                                int GridWidth, int GridHeight, double Weight, int Price, int Durability = 0, int Speed = 100, int Plates = 0);
+
+    private const int Base = 12000;
+    public static readonly Jacket[] Jackets =
+    {
+        // Durability and speed (%) are the client's DogArmour table; they're repeated here for the item descriptions.
+        // Each keeps the id (and so the quests, offers and saved gear) of the jacket it replaced in 0.20.
+        // Sized by how big each is: the stash space it takes, and the load it carries, grow with it.
+        // Named "K9 <Kind> (<colour>)", short "K9 <Short>": one pattern for all the dog's gear (head gear and camera too).
+        new(Black, "harness_chestrig", "Chest Rig", "Rig", 0, 2, 2, 4, 4, 0.8, Base),
+        new(new("6a5d0c0c4fb9a3c5e1d0d073"), "harness_pocket", "Pocket Vest", "Pocket", 3, 2, 3, 5, 4, 2.6, Base * 4, 40, 95, 2),
+        new(new("6a5d0c0c4fb9a3c5e1d0d071"), "harness_tactical", "Tactical Vest", "Tactical", 4, 3, 3, 5, 5, 4.2, Base * 7, 50, 91, 2),
+        // The Last Handler's reward: class 5, light for it, tough, and the biggest of them, with the biggest load.
+        new(K9Ids.EliteHarness, "harness_assault", "Assault Vest", "Assault", 5, 3, 4, 6, 6, 3.8, Base * 18, 75, 93, 4),
+        // Full length, with its own camera on top (so the clip-on camera isn't needed with it): dearer than a tactical vest
+        // and an action camera bought apart.
+        new(K9Ids.CameraVest, "harness_camera", "Camera Vest", "CamVest", 4, 3, 4, 6, 5, 4.6, Base * 15, 55, 92, 2),
+    };
+    private static readonly Dictionary<string, string> LookNames = new()
+    { ["harness_chestrig"] = "Black", ["harness_pocket"] = "Black", ["harness_tactical"] = "Olive", ["harness_assault"] = "Camo", ["harness_camera"] = "Coyote" };
+    public static string Name(Jacket j) => $"K9 {j.Kind} ({LookNames[j.Look]})";
+
+    /// <summary>
+    /// Jackets taken out in 0.20 (the hi-vis basic jacket and the coyote heavy armour). Their items still exist, so a
+    /// profile that has one loads, but nothing sells or rewards them: any in a profile become the jacket next to them
+    /// (same id, so whatever's inside stays) when the game starts (BagKeeper).
+    /// </summary>
+    public static readonly Jacket[] Retired =
+    {
+        new(new("6a5d0c0c4fb9a3c5e1d0d074"), "harness_pocket", "basic protective jacket (old)", "Old jacket", 2, 2, 2, 4, 4, 1.4, Base * 2, 30, 98),
+        new(new("6a5d0c0c4fb9a3c5e1d0d072"), "harness_assault", "heavy armour (old)", "Old armour", 5, 3, 4, 6, 5, 6.5, Base * 12, 60, 86),
+    };
+    public static readonly Dictionary<MongoId, MongoId> ReplacedBy = new()
+    {
+        [new("6a5d0c0c4fb9a3c5e1d0d074")] = new("6a5d0c0c4fb9a3c5e1d0d073"),
+        [new("6a5d0c0c4fb9a3c5e1d0d072")] = K9Ids.EliteHarness,
+    };
+    public static readonly MongoId Holder = new("6a5d0c0c4fb9a3c5e1d0d080");
+    public static readonly MongoId HolderSlotId = new("6a5d0c0c4fb9a3c5e1d0d081"), HeadSlotId = new("6a5d0c0c4fb9a3c5e1d0d082"),
+        CameraSlotId = new("6a5d0c0c4fb9a3c5e1d0d083"), CollarSlotId = new("6a5d0c0c4fb9a3c5e1d0d084");
+    public const string Slot = "DogJacket", HeadSlot = "DogHead", CameraSlot = "DogCamera", CollarSlot = "DogCollar";
+
+    /// <summary>
+    /// The collars, by the style the client draws (its gear_collar_&lt;style&gt; model). Items since 0.31 (before, the DOG
+    /// tab picked from the ones the quests had earned): the dog wears the one in its collar slot, into any raid, and
+    /// never loses it there. K9Items registers them; BagKeeper hands existing dogs the ones they had earned.
+    /// </summary>
+    public static readonly Dictionary<MongoId, string> Collars = new()
+    {
+        [K9Ids.TrainingCollar] = "training", [K9Ids.BlackCollar] = "black", [K9Ids.TacticalCollar] = "buckle",
+    };
+    public static MongoId CollarFor(string? style)
+    {
+        foreach (var (id, s) in Collars) if (s == style) return id;
+        return K9Ids.TrainingCollar;
+    }
+
+    /// <summary>A piece of gear that isn't a jacket: head gear or the clip-on camera (the client's gear_&lt;look&gt; model
+    /// and icon_&lt;look&gt; icon). The dog wears it into PMC raids; it's lost if the dog or you die (BagKeeper).</summary>
+    public sealed record Kit(MongoId Id, string Look, string Slot, string Name, string Short, int Width, int Height, double Weight,
+                             int Price, int Level, string Offer, string Description);
+    public static readonly Kit[] Kits =
+    {
+        new(K9Ids.GogglesTan, "head_goggles_tan", HeadSlot, "K9 Ballistic Goggles (Tan)", "K9 Goggles", 2, 1, 0.2, 38000, 2, K9Ids.Offer(0x31).ToString(),
+            "Strap-on ballistic goggles cut for a dog's head: tinted lens over the eyes, strap behind the ears. Put them on your dog's head in the DOG tab. Lost if the dog or you die in a raid."),
+        new(K9Ids.GogglesBlack, "head_goggles_black", HeadSlot, "K9 Ballistic Goggles (Black)", "K9 Goggles", 2, 1, 0.2, 42000, 2, K9Ids.Offer(0x32).ToString(),
+            "Strap-on ballistic goggles cut for a dog's head: smoked lens over the eyes, strap behind the ears. Put them on your dog's head in the DOG tab. Lost if the dog or you die in a raid."),
+        new(K9Ids.ActionCamera, "camera_action", CameraSlot, "K9 Action Camera (Black)", "K9 Cam", 1, 1, 0.15, 60000, 3, K9Ids.Offer(0x34).ToString(),
+            "A rugged action camera on a harness mount. It clips onto the back of whatever K9 jacket your dog wears, facing forward (the camera vest has its own), so you can watch what your dog sees in a raid. Fit it in the DOG tab. Lost if the dog or you die in a raid."),
+    };
+    public static HashSet<MongoId> KitIds => Kits.Select(k => k.Id).ToHashSet();
+
+    /// <summary>
+    /// Gear taken out: the camera headset (0.29.1; the dog's camera is the action camera or the camera vest's). Its item
+    /// still exists so a profile that has one loads, but nothing sells it or takes it, and any in a profile becomes an
+    /// action camera when the game starts (BagKeeper).
+    /// </summary>
+    public static readonly Kit[] RetiredKits =
+    {
+        new(K9Ids.CameraHeadset, "head_headset", HeadSlot, "K9 Camera Headset (old)", "K9 Headset", 2, 2, 0.45, 60000, 4, K9Ids.Offer(0x33).ToString(),
+            "No longer made: it becomes a K9 Action Camera."),
+    };
+
+    public static bool IsJacket(MongoId template) => Jackets.Any(j => j.Id == template);
+    // Jackets with a camera of their own: no slot for the clip-on one.
+    public static readonly HashSet<string> BuiltInCamera = new() { "harness_camera" };
+    public static HashSet<MongoId> JacketIds => Jackets.Select(j => j.Id).ToHashSet();
+}
+
+/// <summary>Registers the jackets and the hidden holder item.</summary>
+[Injectable(TypePriority = OnLoadOrder.Preload + 1)]
+public sealed class GearItems(CustomItemService items, TemplateTable templates, LocaleTable locales, ICloner cloner, ISptLogger<GearItems> logger) : IOnLoad
+{
+    // The game's Item case: a plain container that is allowed to take items during a raid. Its one grid ("main") is the
+    // jackets' load (they were item cases before 0.25, so what's inside them already sits in "main").
+    private static readonly MongoId ItemCase = new("59fb042886f7746c5005a7b2");
+    // The jackets are armoured rigs like the game's own: copies of the Tasmanian Tiger SK plate carrier (front and back
+    // plate slots, nothing else to fill), the sides' slots from the ANA Tactical M2 for the vest that takes four.
+    private static readonly MongoId Carrier = new("628cd624459354321c4b7fa2"), SideCarrier = new("5ab8dced86f774646209ec87");
+    private const string ArmouredRigsHandbook = "5b5f6f8786f77447ed563642";
+    private const string ContainersHandbook = "5b5f6fa186f77409407a7eb7", ElectronicsHandbook = "5b47574386f77428ca22b2ef";
+    private static readonly MongoId FlashStorage = new("5c05300686f7746dce784e5d");   // VPX flash storage module
+
+    public Task OnLoadAsync(CancellationToken cancellationToken)
+    {
+        MongoId parent = templates.Items[ItemCase].Parent;
+        MongoId rigParent = templates.Items[Carrier].Parent;
+        int index = 0;
+        foreach (var j in DogGear.Jackets.Concat(DogGear.Retired))
+        {
+            index++;
+            bool retired = DogGear.Retired.Contains(j);
+            bool camera = !retired && !DogGear.BuiltInCamera.Contains(j.Look);
+            string plates = j.Plates == 0 ? "" : $" Takes {(j.Plates == 4 ? "front, back and side" : "front and back")} armour plates (any the game has; fit them in its inspect window or drag them onto it): a plate stops a round where it covers, before the vest's own armour.";
+            string clip = camera ? " A K9 action camera clips onto it." : "";
+            string repair = j.ArmourClass <= 3 ? "aramid, Cordura or ripstop fabric, or KEKTAPE" : "aramid fiber or Cordura fabric";
+            string protection = j.ArmourClass == 0 ? "No armour: light and quick."
+                : $"Armour class {j.ArmourClass} over the chest and back, durability {j.Durability}; the dog moves at {j.Speed}% speed in it. " +
+                  $"Wear carries over between raids; repair it at a kennel with a Working Dog Station using {repair}.";
+            if (!Clone(j.Id, rigParent, "k9companion_jacket_" + (retired ? "old_" + j.Id.ToString()[^3..] : j.Look), j.Price, new LocaleDetails
+            {
+                Name = DogGear.Name(j),
+                ShortName = "K9 " + j.Short,
+                Description = $"{protection}{plates}{clip} Carries a {j.GridWidth}x{j.GridHeight} load. Put it on your dog in the DOG tab and fill it like any container; " +
+                              "it goes into PMC raids with the dog (look at the dog and press your interact key to open it) and comes home with you when you both make it out."
+            }, Carrier, ArmouredRigsHandbook)) continue;
+            var props = templates.Items[j.Id].Properties!;
+            props.Width = j.Width; props.Height = j.Height; props.Weight = j.Weight;
+            // Insurable like the game's own rigs: lost with you or the dog, the insurer may find it (BagKeeper.Insure).
+            // Never listed on the flea market (the flea's made-up sellers would offer them bare): it shows only Dr. Yang's
+            // plated offers, which the flea takes from his shelves regardless (ragfair.json traderItems is false).
+            props.CanSellOnRagfair = false; props.InsuranceDisabled = retired;
+            // One load grid, the item case's "main" (the carrier's own pouches would leave what's inside without a place).
+            var main = cloner.Clone(templates.Items[ItemCase].Properties!.Grids!.First())!;
+            main.Parent = j.Id;
+            props.Grids = new List<Grid> { main };
+            props.Slots = Slots(j, index, camera);
+            // A plain grid: the carrier's pouch layout drawn over the one load grid jumbles it.
+            props.RigLayoutName = "";
+            // Its own armour, as the inspect window shows it (class, durability, chest and back): the client's DogArmour
+            // tier is what actually stops rounds, and the durability shown follows the dog's wear (DogArmour.ShowWear).
+            if (j.ArmourClass > 0)
+            {
+                props.ArmorClass = j.ArmourClass;
+                props.Durability = props.MaxDurability = j.Durability;
+                props.ArmorMaterial = j.ArmourClass <= 3 ? ArmorMaterial.Aramid : ArmorMaterial.UHMWPE;
+                props.ArmorColliders = new List<string> { "RibcageUp", "RibcageLow", "SpineTop", "SpineDown" };
+                // The rest of what the game reads on any armour (the carrier copied has none of it; a null crashes the
+                // handbook while the profile loads). Values as the game's own soft armour.
+                props.ArmorPlateColliders = new List<string>();
+                props.Indestructibility = .9;
+                props.DeafStrength = "None";
+                props.BlindnessProtection = 0;
+                props.MaterialType = "BodyArmor";
+            }
+            var grid = props.Grids?.FirstOrDefault()?.Properties;
+            if (grid != null)
+            {
+                // Never smaller than the old 4x4 saddlebag, so nothing already inside ends up outside the grid.
+                grid.CellsH = j.GridWidth; grid.CellsV = j.GridHeight;
+                // No jacket inside a jacket.
+                var filter = grid.Filters?.FirstOrDefault();
+                if (filter != null) filter.ExcludedFilter = (filter.ExcludedFilter ?? new HashSet<MongoId>()).Union(DogGear.JacketIds.Append(DogGear.Holder)).ToHashSet();
+            }
+        }
+
+        // Head gear and the camera: small items (copies of a flash storage module, which only shows if one is dropped on
+        // the ground; the stash shows the client's own picture of the gear).
+        foreach (var k in DogGear.Kits.Concat(DogGear.RetiredKits))
+        {
+            if (!Clone(k.Id, templates.Items[FlashStorage].Parent, "k9companion_" + k.Look, k.Price, new LocaleDetails
+            { Name = k.Name, ShortName = k.Short, Description = k.Description }, FlashStorage, ElectronicsHandbook)) continue;
+            var props = templates.Items[k.Id].Properties!;
+            bool retired = DogGear.RetiredKits.Contains(k);
+            props.Width = k.Width; props.Height = k.Height; props.Weight = k.Weight;
+            props.CanSellOnRagfair = !retired; props.InsuranceDisabled = retired;
+        }
+
+        if (Clone(DogGear.Holder, parent, "k9companion_dog_gear", 1, new LocaleDetails
+        {
+            Name = "K9 dog", ShortName = "Dog", Description = "What your dog is wearing."
+        }))
+        {
+            var props = templates.Items[DogGear.Holder].Properties!;
+            props.Width = 1; props.Height = 1; props.Weight = 0;
+            props.CanSellOnRagfair = false; props.InsuranceDisabled = true;
+            props.Grids = new List<Grid>();
+            props.Slots = new List<Slot>
+            {
+                new()
+                {
+                    Name = DogGear.Slot, Id = DogGear.HolderSlotId, Parent = DogGear.Holder, Prototype = "55d30c4c4bdc2db4468b457e",
+                    Required = false, MergeSlotWithChildren = false,
+                    Properties = new SlotProperties { Filters = new List<SlotFilter> { new() { Filter = DogGear.JacketIds } } }
+                },
+                KitSlot(DogGear.HeadSlot, DogGear.HeadSlotId),
+                KitSlot(DogGear.CameraSlot, DogGear.CameraSlotId),
+                new()
+                {
+                    Name = DogGear.CollarSlot, Id = DogGear.CollarSlotId, Parent = DogGear.Holder, Prototype = "55d30c4c4bdc2db4468b457e",
+                    Required = false, MergeSlotWithChildren = false,
+                    Properties = new SlotProperties { Filters = new List<SlotFilter> { new() { Filter = DogGear.Collars.Keys.ToHashSet() } } }
+                },
+            };
+        }
+
+        // The slot's heading in the DOG tab.
+        foreach (var language in locales.Global.Values)
+            language.AddTransformer(data =>
+            {
+                if (data != null) { data[DogGear.Slot] = "Jacket"; data[DogGear.HeadSlot] = "Head"; data[DogGear.CameraSlot] = "Camera"; data[DogGear.CollarSlot] = "Collar"; }
+                return data;
+            });
+        logger.Info($"[K9Companion] {DogGear.Jackets.Length} dog jackets and {DogGear.Kits.Length} pieces of head and camera gear registered.");
+        return Task.CompletedTask;
+    }
+
+    // A jacket's slots: its plates (copies of the carriers' own, so they take what those take) and the clip-on camera.
+    private List<Slot> Slots(DogGear.Jacket j, int index, bool camera)
+    {
+        var slots = new List<Slot>();
+        var names = new List<(MongoId from, string name)>();
+        if (j.Plates >= 2) { names.Add((Carrier, "Front_plate")); names.Add((Carrier, "Back_plate")); }
+        if (j.Plates >= 4) { names.Add((SideCarrier, "Left_side_plate")); names.Add((SideCarrier, "Right_side_plate")); }
+        int n = 0;
+        foreach (var (from, name) in names)
+        {
+            Slot? source = templates.Items[from].Properties?.Slots?.FirstOrDefault(s => s.Name == name);
+            if (source == null) { logger.Warning($"[K9Companion] The game's {name} slot wasn't found; {DogGear.Name(j)} goes without it."); continue; }
+            Slot copy = cloner.Clone(source)!;
+            copy.Id = new MongoId(K9Ids.Make(0xa, index, ++n)); copy.Parent = j.Id; copy.Required = false;
+            // No plate comes with it.
+            foreach (var f in copy.Properties?.Filters ?? new List<SlotFilter>()) f.Plate = null;
+            slots.Add(copy);
+        }
+        if (camera)
+            slots.Add(new Slot
+            {
+                Name = DogGear.CameraSlot, Id = new MongoId(K9Ids.Make(0xa, index, 0xc)), Parent = j.Id, Prototype = "55d30c4c4bdc2db4468b457e",
+                Required = false, MergeSlotWithChildren = false,
+                Properties = new SlotProperties { Filters = new List<SlotFilter> { new() { Filter = new HashSet<MongoId> { K9Ids.ActionCamera } } } }
+            });
+        return slots;
+    }
+
+    // One of the dog's slots for a kind of kit (head gear, the camera).
+    private static Slot KitSlot(string name, MongoId id) => new()
+    {
+        Name = name, Id = id, Parent = DogGear.Holder, Prototype = "55d30c4c4bdc2db4468b457e", Required = false, MergeSlotWithChildren = false,
+        Properties = new SlotProperties { Filters = new List<SlotFilter> { new() { Filter = DogGear.Kits.Where(k => k.Slot == name).Select(k => k.Id).ToHashSet() } } }
+    };
+
+    private bool Clone(MongoId id, MongoId parent, string name, int price, LocaleDetails text, MongoId? from = null, string handbook = ContainersHandbook)
+    {
+        var result = items.CreateItemFromClone(new NewItemFromCloneDetails
+        {
+            ItemTplToClone = from ?? ItemCase, NewId = id, ParentId = parent, NewItemName = name,
+            HandbookParentId = handbook, HandbookPriceRoubles = price, FleaPriceRoubles = price,
+            Locales = new Dictionary<string, LocaleDetails> { ["en"] = text }
+        });
+        if (!result.Success) logger.Error($"[K9Companion] Couldn't create {name}: " + string.Join("; ", result.Errors ?? new List<string>()));
+        return result.Success == true;
+    }
+}
+
+/// <summary>
+/// Dog food in raids. Dr. Yang's quests take it found in raid only, so it turns up wherever its vanilla look-alike does,
+/// as often: the can wherever the can of beef stew is, the pack of meat wherever the dried beef is, in containers, lying
+/// loose and in scavs' pockets, vests and bags (BotQuestItemsPatch marks those found in raid, as scav loot isn't otherwise).
+/// A person can eat it too, and it does them little good: hardly any energy, and it leaves them thirsty.
+/// </summary>
+[Injectable(TypePriority = OnLoadOrder.Preload + 2)]
+public sealed class DogFoodInRaids(LocationTable locations, BotTable bots, TemplateTable templates, ISptLogger<DogFoodInRaids> logger) : IOnLoad
+{
+    private static readonly (MongoId Ours, MongoId Like)[] Pairs =
+    {
+        (DogFoodItems.DogFood, new MongoId("57347d7224597744596b4e72")),   // can of beef stew (large)
+        (DogFoodItems.DogMeat, new MongoId("65815f0e647e3d7246384e14")),   // pack of dried beef
+    };
+
+    public static bool IsDogFood(MongoId tpl) => tpl == DogFoodItems.DogFood || tpl == DogFoodItems.DogMeat;
+
+    private static readonly string[] Scavs = { "assault", "cursedassault", "marksman" };
+
+    // What eating it does to a person (energy, hydration): the beef it copies gives 45-55 energy for 5 water.
+    private static readonly (MongoId Item, double Energy, double Hydration)[] ForPeople =
+    {
+        (DogFoodItems.DogFood, 15, -20), (DogFoodItems.DogMeat, 10, -25), (K9Ids.PremiumFood, 20, -20), (K9Ids.Treats, 5, -10),
+    };
+
+    public Task OnLoadAsync(CancellationToken cancellationToken)
+    {
+        foreach (var (item, energy, hydration) in ForPeople)
+        {
+            if (templates.Items.GetValueOrDefault(item)?.Properties is not { } props) continue;
+            props.EffectsHealth = new Dictionary<HealthFactor, EffectsHealthProperties>
+            {
+                [HealthFactor.Energy] = new() { Value = energy }, [HealthFactor.Hydration] = new() { Value = hydration },
+            };
+        }
+
+        int maps = 0;
+        foreach (Location map in locations.GetDictionary().Values)
+        {
+            if (map?.StaticLoot == null && map?.LooseLoot == null) continue;
+            map.StaticLoot?.AddTransformer(InContainers);
+            map.LooseLoot?.AddTransformer(LyingLoose);
+            maps++;
+        }
+
+        int pools = 0;
+        foreach (string role in Scavs)
+        {
+            if (!bots.Types.TryGetValue(role, out BotType? type) || type?.BotInventory?.Items is not { } carried) continue;
+            foreach (var pool in new[] { carried.Backpack, carried.Pockets, carried.TacticalVest })
+            {
+                if (pool == null) continue;
+                foreach (var (ours, like) in Pairs)
+                    if (pool.TryGetValue(like, out double weight) && pool.TryAdd(ours, weight)) pools++;
+            }
+        }
+        logger.Info($"[K9Companion] Dog food turns up in raids on {maps} maps and in {pools} scav loot pools, as often as the beef it copies.");
+        return Task.CompletedTask;
+    }
+
+    private static Dictionary<MongoId, StaticLootDetails>? InContainers(Dictionary<MongoId, StaticLootDetails>? loot)
+    {
+        if (loot == null) return loot;
+        foreach (StaticLootDetails details in loot.Values)
+        {
+            if (details.ItemDistribution == null) continue;
+            var list = details.ItemDistribution.ToList();
+            bool added = false;
+            foreach (var (ours, like) in Pairs)
+            {
+                ItemDistribution? source = list.FirstOrDefault(d => d.Tpl == like);
+                if (source == null || list.Any(d => d.Tpl == ours)) continue;
+                list.Add(new ItemDistribution { Tpl = ours, RelativeProbability = source.RelativeProbability });
+                added = true;
+            }
+            if (added) details.ItemDistribution = list;
+        }
+        return loot;
+    }
+
+    // A loose spot lists the items it can be (each under a key) and the odds of each: ours joins every spot that can be its
+    // look-alike, at the same odds.
+    private static LooseLoot? LyingLoose(LooseLoot? loot)
+    {
+        if (loot?.Spawnpoints == null) return loot;
+        foreach (Spawnpoint point in loot.Spawnpoints)
+        {
+            if (point.Template?.Items == null || point.ItemDistribution == null) continue;
+            var items = point.Template.Items.ToList();
+            var odds = point.ItemDistribution.ToList();
+            bool added = false;
+            foreach (var (ours, like) in Pairs)
+            {
+                SptLootItem? source = items.FirstOrDefault(i => i.Template == like && string.IsNullOrEmpty(i.ParentId));
+                string key = ours.ToString();
+                if (source == null || items.Any(i => i.ComposedKey == key)) continue;
+                LooseLootItemDistribution? theirs = odds.FirstOrDefault(d => d.ComposedKey?.Key == source.ComposedKey);
+                if (theirs == null) continue;
+                items.Add(new SptLootItem { Id = new MongoId(), Template = ours, ComposedKey = key, Upd = new Upd { StackObjectsCount = 1 } });
+                odds.Add(new LooseLootItemDistribution { ComposedKey = new ComposedKey { Key = key }, RelativeProbability = theirs.RelativeProbability });
+                added = true;
+            }
+            if (!added) continue;
+            point.Template.Items = items;
+            point.ItemDistribution = odds;
+        }
+        return loot;
+    }
+}
+
+/// <summary>
+/// Every id the K9 expansion adds. All are 24 hex digits under the mod's own prefix; the 20th digit says what kind of
+/// thing it is (1 quest, 2 condition, 3 reward, 4 reward item, 5 trader offer, 6 item template, 7 hideout improvement,
+/// 8 counter part), so nothing here can collide with the 0.15 ids (which have a 0 there) or with each other.
+/// </summary>
+public static class K9Ids
+{
+    private const string Prefix = "6a5d0c0c4fb9a3c5e1d";
+
+    public static string Make(int kind, int a, int b) => $"{Prefix}{kind:x1}{a:x2}{b:x2}";
+    public static MongoId Quest(int n) => new(Make(1, 0, n));
+    public static string Condition(int quest, int index) => Make(2, quest, index);
+    public static string Reward(int quest, int index) => Make(3, quest, index);
+    public static string RewardItem(int quest, int index) => Make(4, quest, index);
+    public static string CounterPart(int quest, int index) => Make(8, quest, index);
+    public static MongoId Offer(int n) => new(Make(5, 0, n));
+    public static MongoId Template(int n) => new(Make(6, 0, n));
+
+    // ---- the questline (1-10) and the contracts (0x11-0x15) ----------------------------------------------------
+    public const int ManBestFriend = 1, StraysOfTarkov = 2, FamiliarScent = 3, MissingUnit = 4, TrustIsEarned = 5,
+        LearningTheRopes = 6, WorkingDog = 7, TeethAndSteel = 8, NoDogLeftBehind = 9, LastHandler = 10;
+    public const int DailyRations = 0x11, SafeReturn = 0x12, SupplyRun = 0x13, WorkingPartnership = 0x14, ThePack = 0x15;
+    // The story, five quests since 0.30: Strays of Tarkov and A Familiar Scent became part of The Missing Unit,
+    // Learning the Ropes part of Teeth and Steel, No Dog Left Behind part of The Last Handler, and Working Dog (the
+    // dog's loot search) went. Their numbers aren't reused (profiles may still name them).
+    public static readonly int[] Story = { ManBestFriend, MissingUnit, TrustIsEarned, TeethAndSteel, LastHandler };
+    public static readonly int[] RetiredStory = { StraysOfTarkov, FamiliarScent, LearningTheRopes, WorkingDog, NoDogLeftBehind };
+    public static readonly int[] Contracts = { DailyRations, SafeReturn, SupplyRun, WorkingPartnership, ThePack };
+
+    // ---- new item templates -----------------------------------------------------------------------------------
+    public static readonly MongoId K9Tag = Template(0x01), HandlerJacket = Template(0x02), DogWhistle = Template(0x03),
+        TransportRecords = Template(0x04), VetSupplyCase = Template(0x05), K9Insignia = Template(0x06),
+        VetKit = Template(0x10), EliteHarness = Template(0x20), ArmourLocker = Template(0x30), PremiumLocker = Template(0x31);
+    // The camera vest, head gear and the clip-on camera (DogGear.Kits).
+    public static readonly MongoId CameraVest = Template(0x21), GogglesTan = Template(0x22), GogglesBlack = Template(0x23),
+        CameraHeadset = Template(0x24), ActionCamera = Template(0x25);
+    // Dog supplies sold by loyalty level (see DrYang).
+    public static readonly MongoId Treats = Template(0x11), PremiumFood = Template(0x12), BedLiner = Template(0x13), ThermalBed = Template(0x14),
+        TrainingKit = Template(0x15), TacticalCollar = Template(0x16);
+    // The other two collars (the tactical collar is the third): the dog wears one in its collar slot (DogGear.Collars).
+    public static readonly MongoId TrainingCollar = Template(0x17), BlackCollar = Template(0x18);
+
+    // ---- the kennel: three improvements of the hideout's Rest Space ---------------------------------------------
+    public static readonly MongoId[] Kennel = { new(Make(7, 0, 1)), new(Make(7, 0, 2)), new(Make(7, 0, 3)) };
+
+    // ---- vanilla templates --------------------------------------------------------------------------------------
+    public static readonly MongoId Roubles = new("5449016a4bdc2d6f028b456f");
+    public const string Water06 = "5448fee04bdc2dbc018b4567", Aquamari = "5c0fa877d174af02a012e1cf", WaterRation = "60098b1705871270cd5352a1";
+    public const string Ai2 = "5755356824597772cb798962", CarKit = "590c661e86f7741e566b646a", Salewa = "544fb45d4bdc2dee738b4568",
+        Ifak = "590c678286f77426c9660122", Afak = "60098ad7c2240c0fe85c570a", Grizzly = "590c657e86f77412b013051d";
+    public const string Bloodset = "5b4335ba86f7744d2837a264", Saline = "59e3606886f77417674759a5", MedTools = "619cc01e0a7c3a1a2731940c",
+        Syringe = "5d1b3f2d86f774253763b735", Ophthalmoscope = "5af0534a86f7743b6f354284";
+    public const string CorrugatedHose = "59e35cbb86f7741778269d83", Bolts = "57347c5b245977448d35f6e1", ScrewNuts = "57347c77245977448d35f6e2",
+        Toolset = "590c2e1186f77425357b6124", MetalParts = "61bf7b6302b3924be92fa8c3", MilitaryCable = "5d0375ff86f774186372f685",
+        Ledx = "5c0530ee86f774697952d952";
+    public const string Fleece = "5e2af47786f7746d404f3aaa", Ripstop = "5e2af4a786f7746d3f3c3400", Paracord = "5c12688486f77426843c7d32",
+        Aramid = "5e2af4d286f7746d4159f07a", Cordura = "5e2af41e86f774755a234b67", Kektape = "5e2af29386f7746d4159f077";
+
+    // ---- maps ---------------------------------------------------------------------------------------------------
+    public const string Customs = "56f40101d2720b2a4d8b45d6", Woods = "5704e3c2d2720bac5b8b4567",
+        Reserve = "5704e5fad2720bc05b8b4567", Streets = "5714dc692459777137212e12", AnyMap = "any";
+}

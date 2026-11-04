@@ -1,11 +1,14 @@
 using System.Collections.Generic;
-using EFT;
+using System.Diagnostics;
+using System.Linq;
+using System;
 using EFT.Ballistics;
 using EFT.HealthSystem;
 using EFT.Interactive;
 using EFT.InventoryLogic;
-using UnityEngine;
+using EFT;
 using UnityEngine.AI;
+using UnityEngine;
 
 namespace K9Companion
 {
@@ -770,5 +773,842 @@ namespace K9Companion
             ownerSubscribed = null;
             hitboxes = null;
         }
+    }
+
+    /// <summary>The raid's navigation mesh and colliders, for CoverRoute.</summary>
+    internal sealed class NavCoverWorld : ICoverWorld
+    {
+        private readonly NavMeshPath path = new NavMeshPath();
+
+        public bool Snap(Vector3 point, float radius, out Vector3 on)
+        {
+            bool ok = NavMesh.SamplePosition(point, out NavMeshHit hit, radius, NavMesh.AllAreas);
+            on = ok ? hit.position : point;
+            return ok;
+        }
+
+        public bool CanWalk(Vector3 from, Vector3 to) => !NavMesh.Raycast(from, to, out _, NavMesh.AllAreas);
+
+        // The same mask the bots' own eyes use, so hidden from this is hidden from them.
+        public bool Blocked(Vector3 from, Vector3 to) => Physics.Linecast(from, to, LayersMaskController.HighPolyWithTerrainMask, QueryTriggerInteraction.Ignore);
+
+        public bool Screened(Vector3 from, Vector3 to) => Physics.Linecast(from, to, LayersMaskController.Foliage, QueryTriggerInteraction.Collide);
+
+        public bool Path(Vector3 from, Vector3 to, List<Vector3> corners)
+        {
+            if (!NavMesh.CalculatePath(from, to, NavMesh.AllAreas, path) || path.status != NavMeshPathStatus.PathComplete) return false;
+            corners.AddRange(path.corners);
+            return true;
+        }
+
+        public float EdgeDistance(Vector3 point) => NavMesh.FindClosestEdge(point, out NavMeshHit hit, NavMesh.AllAreas) ? hit.distance : float.MaxValue;
+    }
+
+    /// <summary>
+    /// Going for an enemy without being seen. Far off it runs, by a way that keeps out of sight of the target and any other
+    /// enemy about (CoverRoute). Close in, it trots while it's hidden and goes low and slow where it can be seen. At the edge of
+    /// cover it waits a moment if someone's looking at the ground ahead, and crosses a short gap in one dash. Within rushing
+    /// distance, or once it has been noticed close to, it stops hiding: a bark, a sprint, the bite.
+    /// The way bots notice the dog (DogThreatLayer) takes all this in: low, it has to be closer and takes longer to spot,
+    /// and behind cover it can't be seen at all.
+    /// That's the Stealth approach. Auto does the same with anything further off, but goes straight in at anything really
+    /// close, and back to stalking if it gets away. Direct just runs at it. They can be changed in the middle of a chase.
+    /// </summary>
+    public sealed partial class Companion
+    {
+        // How close before it stops hiding: with the target in plain view, and if it has been spotted.
+        private const float RushRange = 9f, SpottedRush = 18f;
+        // Further along the route than this it's still just getting there; inside it, it's careful; inside quiet range it creeps.
+        private const float ProwlRange = 30f, QuietRange = 13f;
+        private const float PlanEvery = 8f, TargetMoved = 5f, PlanBudget = 1.2f;
+        private const float LongestHold = 2.6f, TotalHold = 7f, ShortGap = 6f;
+        private const float WatchRange = 70f, AheadLook = 3.5f, Noticeable = .25f;
+        // A bot's own numbers where it's on this machine; otherwise (a Fika client) the game's usual ones.
+        private const float UsualViewCos = -.64f, UsualViewRange = 120f;
+
+        private readonly CoverRoute route = new CoverRoute();
+        private readonly NavCoverWorld cover = new NavCoverWorld();
+        private readonly List<Watcher> watchers = new List<Watcher>();
+        private bool stalking, rushing, spotted, planning, stalkLow, dashing, seenHere, seenAhead, watchedAhead;
+        private float nextWatch, nextPlan, noRouteUntil, holdUntil, holdLeft, gapAhead, nextRushBark;
+        private Vector3 plannedFor;
+
+        // Crouched: it takes longer to notice and has to be closer. (Bots read this; so does the walk.)
+        internal bool Low => stalkLow || (crouching && !HasTask && shownSpeed < 1.5f);
+
+        private void StartStalk()
+        {
+            ResetStalk();
+            if (Plugin.Approaching == DogApproach.Direct || WalkingWithoutNavmesh) return;
+            stalking = true; holdLeft = TotalHold;
+        }
+
+        private void ResetStalk()
+        {
+            stalking = rushing = spotted = planning = stalkLow = dashing = false;
+            seenHere = seenAhead = watchedAhead = false;
+            nextWatch = nextPlan = noRouteUntil = holdUntil = 0;
+            route.Cancel();
+        }
+
+        // A bot has noticed the dog, or something has hit it.
+        internal void Noticed(BotOwner by)
+        {
+            if (!stalking || spotted) return;
+            spotted = true; holdUntil = 0; nextPlan = 0;
+            Plugin.Log.LogInfo("Stalk: spotted" + (by != null ? " by " + by.Profile?.Nickname : "") + ".");
+        }
+
+        // The end of hiding.
+        private void Rush()
+        {
+            stalking = false; rushing = true; stalkLow = dashing = planning = false; holdUntil = 0;
+            route.Cancel();
+            corners = Array.Empty<Vector3>(); corner = 0; nextPath = 0;
+            // Once, however often Auto changes its mind as the target comes and goes.
+            if (Time.time < nextRushBark) return;
+            nextRushBark = Time.time + 6;
+            audio?.Play("bark");
+            if (attackTarget != null) Say(Plugin.DogName.Value + " goes in!");
+        }
+
+        // How fast to go this frame while stalking; below zero when it isn't, and the plain chase takes over. A problem in
+        // here only ends the sneaking: it still goes for the target.
+        private float TickStalk(Vector3 from, Tuning t)
+        {
+            try { return StalkPace(from, t); }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning("Stalk given up: " + e);
+                Rush();
+                return -1;
+            }
+        }
+
+        private float StalkPace(Vector3 from, Tuning t)
+        {
+            if (attackTarget == null) { stalkLow = false; return -1; }
+            DogApproach how = WalkingWithoutNavmesh ? DogApproach.Direct : Plugin.Approaching;
+            Vector3 at = attackTarget.Transform.position;
+            float straight = Vector3.Distance(from, at);
+            if (how == DogApproach.Direct)
+            {
+                if (stalking) Rush();
+                stalkLow = false;
+                return -1;
+            }
+            if (!stalking)
+            {
+                // Rushing under Auto, it goes back to stalking if the target has got away. (Stealth's rush is for good. Not
+                // rushing at all means the approach has just been changed from Direct.)
+                if (rushing && (how != DogApproach.Auto || ApproachRule.GoDirect(straight, Plugin.AutoRush, true))) { stalkLow = false; return -1; }
+                stalking = true; rushing = spotted = false;
+                holdLeft = TotalHold; holdUntil = nextWatch = nextPlan = 0;
+                corners = Array.Empty<Vector3>(); corner = 0;
+            }
+            bool close = how == DogApproach.Auto && ApproachRule.GoDirect(straight, Plugin.AutoRush, false);
+            if (close || (straight <= (spotted ? SpottedRush : RushRange) && inSight) || straight <= 3.5f) { Rush(); return -1; }
+            if (Time.time >= nextWatch) { nextWatch = Time.time + .25f; LookOut(from, attackTarget); }
+            if (!KeepRoute(from, at)) { Rush(); return -1; }
+            if (corner >= corners.Length) { lastProgress = Time.time; stalkLow = true; return 0; }   // waiting for a new route
+
+            float left = PathLeft(from);
+            float run = Locomotion.Speed(Gait.Run, t) * .8f, trot = Locomotion.Speed(Gait.Trot, t) * .95f, prowl = Locomotion.StalkSpeed(t);
+            if (spotted) { stalkLow = false; return Locomotion.Speed(Gait.Run, t); }
+            if (left > ProwlRange) { stalkLow = false; return seenHere ? Locomotion.Speed(Gait.Run, t) : run; }
+
+            if (Time.time < holdUntil)
+            {
+                if (watchedAhead) { lastProgress = Time.time; stalkLow = true; return 0; }
+                holdUntil = 0;
+            }
+            if (!seenHere && seenAhead)
+            {
+                if (watchedAhead && holdLeft > 0)
+                {
+                    float hold = Mathf.Min(LongestHold, holdLeft);
+                    holdLeft -= hold; holdUntil = Time.time + hold;
+                    lastProgress = Time.time; stalkLow = true;
+                    return 0;
+                }
+                dashing = gapAhead <= ShortGap;
+            }
+            else if (seenHere && !seenAhead) dashing = true;   // hidden again just ahead
+            else if (!seenHere && !seenAhead) dashing = false;
+            if (dashing) { stalkLow = false; return run; }
+            if (seenHere || seenAhead) { stalkLow = true; return prowl; }
+            stalkLow = left <= QuietRange;
+            return stalkLow ? prowl : trot;
+        }
+
+        // The route, re-planned when the target has moved off or it has gone stale; false when there's no way at all.
+        private bool KeepRoute(Vector3 from, Vector3 to)
+        {
+            if (Time.time < noRouteUntil) return false;
+            if (planning)
+            {
+                if (route.Step(PlanBudget))
+                {
+                    planning = false;
+                    if (route.Points != null && route.Points.Length > 1) UseRoute(route.Points);
+                }
+                return true;
+            }
+            bool stale = corner >= corners.Length || (to - plannedFor).sqrMagnitude > TargetMoved * TargetMoved || Time.time >= nextPlan;
+            if (!stale) return true;
+            nextPlan = Time.time + PlanEvery; plannedFor = to;
+            if (!route.Begin(cover, from, to, watchers)) { noRouteUntil = Time.time + 2; return false; }
+            planning = true;
+            // Off along the plain path while the better one is worked out (it takes a moment).
+            if (corner >= corners.Length && route.Plain != null) UseRoute(route.Plain);
+            return true;
+        }
+
+        private void UseRoute(Vector3[] points)
+        {
+            corners = points; corner = Mathf.Min(1, points.Length - 1); pathTarget = points[points.Length - 1];
+            pathExpires = float.MaxValue;
+        }
+
+        // Who's about, and what they can see of here and of the way ahead.
+        private void LookOut(Vector3 from, Player prey)
+        {
+            GatherWatchers(from, prey != null ? prey.Transform.position : from, prey);
+            seenHere = Noticeable <= CoverRoute.Exposure(cover, from, watchers);
+            Vector3 ahead = PointAlong(from, AheadLook);
+            seenAhead = Noticeable <= CoverRoute.Exposure(cover, ahead, watchers);
+            watchedAhead = seenAhead && watchers.Any(w => Vector3.Dot(w.Look, (ahead - w.Eye).normalized) > .7f);
+            gapAhead = 0;
+            if (!seenAhead) return;
+            // How much of the way ahead is in the open.
+            for (float d = AheadLook; d <= AheadLook + 9; d += 1.5f)
+            {
+                if (Noticeable > CoverRoute.Exposure(cover, PointAlong(from, d), watchers)) break;
+                gapAhead += 1.5f;
+            }
+        }
+
+        private void GatherWatchers(Vector3 from, Vector3 around, Player prey)
+        {
+            watchers.Clear();
+            Player owner = CurrentPlayer;
+            if (world == null || owner == null) return;
+            foreach (Player p in world.AllAlivePlayersList)
+            {
+                if (!IsEnemy(p, owner)) continue;
+                if (p != prey && (p.Transform.position - from).sqrMagnitude > WatchRange * WatchRange && (p.Transform.position - around).sqrMagnitude > WatchRange * WatchRange) continue;
+                if (p.MainParts == null || !p.MainParts.TryGetValue(BodyPartType.head, out EnemyPart head)) continue;
+                LookSensor look = p.AIData?.BotOwner?.LookSensor;
+                watchers.Add(new Watcher
+                {
+                    Eye = head.Position, Look = p.LookDirection.normalized, Prey = p == prey,
+                    Weight = p == prey ? 1f : .8f, ViewCos = look != null ? look.VISIBLE_ANGLE : UsualViewCos,
+                    Range = look != null && look.VisibleDist > 1 ? look.VisibleDist * .75f : UsualViewRange
+                });
+            }
+            // The target and the nearest few are all that matter.
+            if (watchers.Count > 5)
+            {
+                Vector3 me = from;
+                watchers.Sort((a, b) => a.Prey != b.Prey ? (a.Prey ? -1 : 1) : (a.Eye - me).sqrMagnitude.CompareTo((b.Eye - me).sqrMagnitude));
+                watchers.RemoveRange(5, watchers.Count - 5);
+            }
+        }
+
+        private float PathLeft(Vector3 from)
+        {
+            float left = 0; Vector3 p = from;
+            for (int i = corner; i < corners.Length; i++) { left += Flat(p, corners[i]); p = corners[i]; }
+            return left;
+        }
+
+        private Vector3 PointAlong(Vector3 from, float distance)
+        {
+            Vector3 p = from;
+            for (int i = corner; i < corners.Length; i++)
+            {
+                float leg = Flat(p, corners[i]);
+                if (leg >= distance && leg > .001f) return Vector3.Lerp(p, corners[i], distance / leg);
+                distance -= leg; p = corners[i];
+            }
+            return p;
+        }
+
+        // The run out to a hunt: a way that keeps out of sight of the spot itself (anyone could be there) and of any enemy
+        // about, while it's a long way off. Close to, or once there, the plain path. Below zero when it's on the plain path.
+        private float TickHuntRoute(Vector3 from, Vector3 spot, Tuning t)
+        {
+            if (Plugin.Approaching == DogApproach.Direct || huntArrived > 0 || WalkingWithoutNavmesh) return -1;
+            float left = Flat(from, spot);
+            if (left < HuntPlainWithin) { stalkLow = false; return -1; }
+            try
+            {
+                if (Time.time >= nextWatch)
+                {
+                    nextWatch = Time.time + .5f;
+                    GatherWatchers(from, spot, null);
+                    watchers.Add(new Watcher
+                    {
+                        Eye = spot + Vector3.up * 1.5f, Look = (from - spot).normalized, Weight = .7f,
+                        ViewCos = -1, Range = UsualViewRange * .7f, Prey = true
+                    });
+                }
+                if (!KeepRoute(from, spot)) return -1;
+                if (corner >= corners.Length) { lastProgress = Time.time; return 0; }
+                return Locomotion.Speed(Gait.Run, t) * .8f;
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning("The hunt's covered route: " + e.Message);
+                noRouteUntil = Time.time + 30;
+                return -1;
+            }
+        }
+
+        // Where the head points: at the target, along the way ahead, round the ground when sniffing, at you when it's close by.
+        private void TickLook(Vector3 from, Player owner)
+        {
+            if (dead || (stance != Stance.Stand && stance != Stance.Sitting)) return;
+            if (Sniffing)
+            {
+                float t = Time.time;
+                model.LookAt(Mathf.Sin(t * 2.3f) * 30f, 8f + Mathf.Sin(t * 5.3f) * 7f);
+                return;
+            }
+            Vector3 eye = from + Vector3.up * .55f + Quaternion.Euler(0, yaw, 0) * Vector3.forward * .55f;
+            Vector3 at;
+            float weight = 1;
+            if (attackTarget != null) at = Body(attackTarget);
+            else if (shownSpeed > .4f && corner < corners.Length) { at = Ahead(from) + Vector3.up * .4f; weight = .7f; }
+            else if (Vector3.Distance(from, owner.Transform.position) < 5f) { at = owner.Transform.position + Vector3.up * 1.3f; weight = .75f; }
+            else return;
+            Vector3 to = at - eye;
+            float flat = new Vector2(to.x, to.z).magnitude;
+            if (flat < .05f) return;
+            float turn = Mathf.DeltaAngle(yaw, Mathf.Atan2(to.x, to.z) * Mathf.Rad2Deg);
+            // Behind it: it doesn't try to look over its shoulder.
+            if (Mathf.Abs(turn) > 120) return;
+            model.LookAt(turn * weight, -Mathf.Atan2(to.y, flat) * Mathf.Rad2Deg * weight);
+        }
+
+        // The body follows the slope under it (on stairs and hillsides it was held level, legs in the ground).
+        private void TickBody(Vector3 at, float dt)
+        {
+            if (IsHideout || model?.Root == null) return;
+            Vector3 along = Quaternion.Euler(0, yaw, 0) * Vector3.forward * BodyHalf;
+            float wanted = 0;
+            if (GroundAt(at + along, out Vector3 front) && GroundAt(at - along, out Vector3 back))
+                wanted = Mathf.Clamp(Mathf.Atan2(back.y - front.y, BodyHalf * 2) * Mathf.Rad2Deg, -MaxSlope, MaxSlope);
+            bodyPitch += (wanted - bodyPitch) * (1 - Mathf.Exp(-9 * dt));
+            model.Root.localRotation = Quaternion.Euler(bodyPitch, 0, 0);
+        }
+        private const float BodyHalf = .42f, MaxSlope = 28f;
+        private float bodyPitch;
+    }
+
+    /// <summary>Whether a shot was at someone: its line passes this close, on its way out rather than behind the muzzle.</summary>
+    internal static class Gunfire
+    {
+        public static bool PassesNear(UnityEngine.Vector3 from, UnityEngine.Vector3 direction, UnityEngine.Vector3 point, float within)
+        {
+            UnityEngine.Vector3 to = point - from;
+            float along = UnityEngine.Vector3.Dot(to, direction);
+            return along > 0 && (to - direction * along).sqrMagnitude <= within * within;
+        }
+    }
+
+    internal enum CombatState { Idle, Chase, Strike, Recover, Return }
+
+    /// <summary>What the dog can tell about its fight this frame. Filled in by the companion, judged by CombatBrain.</summary>
+    internal struct CombatSense
+    {
+        public float Now;
+        public bool TargetValid;   // alive, AI, still hostile to the owner
+        public bool Reachable;     // a complete navmesh path exists (re-checked every second)
+        public bool LineOfSight;   // nothing solid between the dog's head and the target's body
+        public bool InReach;       // a biteable body part is within mouth reach, with no wall in between
+        public bool CanFight;      // alive, standing, not flinching, not badly wounded
+        public bool Progressing;   // has moved or been in contact recently (not stuck)
+        public bool StrikeDone;    // the bite animation has finished
+        public bool Stalking;      // working its way in out of sight: it knows where the target is by scent
+        public float TargetFromOwner, DogFromOwner, Follow;
+    }
+
+    /// <summary>
+    /// The dog's fight in five states: Idle, Chase the target, Strike (one bite animation), Recover (cooldown, facing the
+    /// target) and Return to the owner. It holds no Unity state, so the rules can be tested on their own.
+    /// </summary>
+    internal sealed class CombatBrain
+    {
+        public const float LoseSightAfter = 5f, ChaseLimit = 30f, FightLimit = 60f;
+        // A stalk is slower than a straight chase.
+        public const float StalkChase = 70f, StalkFight = 100f;
+        // Sent in on your order (perhaps far off, by scent): it keeps tracking longer before it gives up.
+        public const float OrderedLoseSight = 15f, OrderedChase = 90f, OrderedFight = 120f;
+
+        private float engagedAt, lastSeen, nextStrike;
+
+        public CombatState State { get; private set; }
+        public bool Ordered { get; private set; }
+        // Why the last fight ended; null while fighting or when nothing needs saying.
+        public string Reason { get; private set; }
+        // True when the dog gave up on a target that is still alive, so it shouldn't pick it straight back up.
+        public bool Abandoned { get; private set; }
+
+        public void Engage(float now, bool ordered)
+        {
+            State = CombatState.Chase; Ordered = ordered; Reason = null; Abandoned = false;
+            engagedAt = lastSeen = now;
+        }
+
+        public void Reset() { State = CombatState.Idle; Ordered = false; Reason = null; Abandoned = false; }
+
+        public CombatState Update(in CombatSense s, float engageDistance, float cooldown)
+        {
+            if (State == CombatState.Idle) return State;
+            if (State == CombatState.Return)
+            {
+                if (s.DogFromOwner <= s.Follow + 1.5f) State = CombatState.Idle;
+                return State;
+            }
+            if (!s.TargetValid) return Leave("Target down.", false);
+            if (s.LineOfSight || s.Stalking) lastSeen = s.Now;
+            bool fighting = State == CombatState.Strike || State == CombatState.Recover;
+            // engageDistance is the ordered range for an ordered fight (the companion passes whichever applies).
+            float range = Ordered ? engageDistance : engageDistance * 1.5f;
+            if (s.TargetFromOwner > range || s.DogFromOwner > range * 1.2f + 10) return Leave("Too far from you.", true);
+            if (s.Now - engagedAt > (Ordered ? OrderedFight : s.Stalking ? StalkFight : FightLimit)) return Leave("Breaking off.", true);
+            if (!fighting)
+            {
+                if (!s.Reachable) return Leave("Can't reach the target.", true);
+                if (s.Now - lastSeen > (Ordered ? OrderedLoseSight : LoseSightAfter)) return Leave("Lost the target.", true);
+                if (!s.Progressing) return Leave("Can't get to the target.", true);
+                if (s.Now - engagedAt > (Ordered ? OrderedChase : s.Stalking ? StalkChase : ChaseLimit)) return Leave("Gave up the chase.", true);
+            }
+
+            bool canBite = s.CanFight && s.InReach && s.LineOfSight;
+            switch (State)
+            {
+                case CombatState.Chase:
+                    if (canBite) State = s.Now >= nextStrike ? CombatState.Strike : CombatState.Recover;
+                    break;
+                case CombatState.Strike:
+                    // A flinch or a fall cancels the bite; either way the cooldown starts.
+                    if (!s.CanFight || s.StrikeDone) { State = CombatState.Recover; nextStrike = s.Now + cooldown; }
+                    break;
+                case CombatState.Recover:
+                    if (!s.InReach || !s.LineOfSight) State = CombatState.Chase;
+                    else if (canBite && s.Now >= nextStrike) State = CombatState.Strike;
+                    break;
+            }
+            return State;
+        }
+
+        private CombatState Leave(string reason, bool abandoned)
+        {
+            State = CombatState.Return; Reason = reason; Abandoned = abandoned;
+            return State;
+        }
+    }
+
+    /// <summary>Someone the dog would rather not be seen by.</summary>
+    internal struct Watcher
+    {
+        public Vector3 Eye, Look;
+        public float Weight, ViewCos, Range;
+        public bool Prey;
+    }
+
+    /// <summary>What the route planner asks of the world (the raid's navigation mesh and colliders, see NavCoverWorld).</summary>
+    internal interface ICoverWorld
+    {
+        bool Snap(Vector3 point, float radius, out Vector3 on);
+        bool CanWalk(Vector3 from, Vector3 to);
+        // Something solid is in the way.
+        bool Blocked(Vector3 from, Vector3 to);
+        // Bushes or the like are in the way: not cover from a bullet, but harder to be seen through.
+        bool Screened(Vector3 from, Vector3 to);
+        bool Path(Vector3 from, Vector3 to, List<Vector3> corners);
+        float EdgeDistance(Vector3 point);
+    }
+
+    /// <summary>
+    /// A way to somewhere that keeps out of sight. The navigation mesh's shortest path is widened into a band of walkable
+    /// points either side of it; each point costs more the more the watchers can see of a dog standing there (out of their
+    /// view it's nearly free, in the open in front of them it's dear) and a search finds the cheapest way through. So the
+    /// dog goes round the far side of a wall, along a hedge or behind a building when that's worth the extra distance, and
+    /// straight when there's nothing to hide behind.
+    /// It works a little each frame, so a long route never costs a stall. Holds no Unity objects.
+    /// </summary>
+    internal sealed class CoverRoute
+    {
+        private const int Sides = 5;
+        private const float MinSpacing = 3f, MaxSpacing = 6f, StationsWanted = 36f;
+        private const float ExposedCost = 8f, CloseToOtherEnemy = 8f, OtherEnemyCost = 5f, EdgeHug = 1.2f, EdgeBonus = .15f, NotSeen = .12f;
+        // Inside this distance of the end it's going to rush anyway, so being seen matters less.
+        private const float RushZone = 10f;
+        private const float DogLow = .45f, DogHigh = .7f, CheapestMetre = .8f;
+
+        private enum Stage { Sampling, Searching, Smoothing, Done }
+
+        private struct Node { public Vector3 P; public float Cost, Exposure; public int Row, Column; }
+
+        private readonly List<Vector3> spine = new List<Vector3>();
+        private readonly List<Vector3> stations = new List<Vector3>();
+        private readonly List<Vector3> sideways = new List<Vector3>();
+        private readonly List<Node> nodes = new List<Node>();
+        private readonly List<Watcher> eyes = new List<Watcher>();
+        private readonly List<int> found = new List<int>();
+        private readonly List<Vector3> smoothed = new List<Vector3>();
+        private readonly Stopwatch clock = new Stopwatch();
+        private ICoverWorld world;
+        private Stage stage = Stage.Done;
+        private int[] grid;
+        private float spacing;
+        private int rows, sampleRow, sampleColumn, start, goal, smoothAt;
+        // The search.
+        private float[] cost;
+        private int[] came;
+        private bool[] closed;
+        private readonly List<KeyValuePair<float, int>> open = new List<KeyValuePair<float, int>>();
+
+        // The shortest way, usable while the better one is being worked out.
+        public Vector3[] Plain { get; private set; }
+        // The route, first point where it starts; null until Step says it's done.
+        public Vector3[] Points { get; private set; }
+        public bool Busy => stage != Stage.Done;
+
+        public bool Begin(ICoverWorld surroundings, Vector3 from, Vector3 to, IList<Watcher> watchers)
+        {
+            world = surroundings; Points = null; Plain = null; stage = Stage.Done;
+            eyes.Clear(); eyes.AddRange(watchers);
+            if (!world.Snap(from, 1.5f, out Vector3 a) || !world.Snap(to, 2.5f, out Vector3 b)) return false;
+            spine.Clear();
+            if (!world.Path(a, b, spine) || spine.Count < 2) return false;
+            Plain = spine.ToArray();
+            MakeStations();
+            nodes.Clear(); open.Clear();
+            grid = new int[rows * (Sides * 2 + 1)];
+            for (int i = 0; i < grid.Length; i++) grid[i] = -1;
+            sampleRow = sampleColumn = 0;
+            stage = Stage.Sampling;
+            return true;
+        }
+
+        // Works for about this long; true once it's finished (Points has the route).
+        public bool Step(float milliseconds)
+        {
+            if (stage == Stage.Done) return true;
+            clock.Restart();
+            long budget = (long)(milliseconds * Stopwatch.Frequency / 1000f);
+            while (stage != Stage.Done && clock.ElapsedTicks < budget)
+            {
+                switch (stage)
+                {
+                    case Stage.Sampling: SampleOne(); break;
+                    case Stage.Searching: SearchOne(); break;
+                    case Stage.Smoothing: SmoothOne(); break;
+                }
+            }
+            return stage == Stage.Done;
+        }
+
+        public void Cancel() { stage = Stage.Done; }
+
+        // How much of a dog standing there the watchers can see, 0 (nothing) to 1 (right in front of them, close).
+        internal static float Exposure(ICoverWorld world, Vector3 ground, IList<Watcher> eyes)
+        {
+            float worst = 0;
+            Vector3 low = ground + Vector3.up * DogLow, high = ground + Vector3.up * DogHigh;
+            for (int i = 0; i < eyes.Count; i++)
+            {
+                Watcher e = eyes[i];
+                Vector3 to = low - e.Eye;
+                float distance = to.magnitude;
+                if (distance > e.Range || distance < .01f) continue;
+                float facing = Vector3.Dot(e.Look, to / distance);
+                float view = facing >= .77f ? 1f : facing >= e.ViewCos ? .6f : NotSeen;
+                float amount = e.Weight * view * Mathf.Lerp(1f, .45f, distance / e.Range);
+                if (amount <= worst) continue;
+                // A dog is low: a crate or a low wall that wouldn't hide a man hides it. Both must be blocked, as bots look for either.
+                if (world.Blocked(e.Eye, low) && world.Blocked(e.Eye, high)) continue;
+                if (world.Screened(e.Eye, low)) amount *= .5f;
+                if (amount > worst) worst = amount;
+            }
+            return worst;
+        }
+
+        private void MakeStations()
+        {
+            float length = 0;
+            for (int i = 1; i < spine.Count; i++) length += Flat(spine[i - 1], spine[i]);
+            spacing = Mathf.Clamp(length / StationsWanted, MinSpacing, MaxSpacing);
+            stations.Clear(); sideways.Clear();
+            stations.Add(spine[0]);
+            float next = spacing;
+            float walked = 0;
+            for (int i = 1; i < spine.Count; i++)
+            {
+                float leg = Flat(spine[i - 1], spine[i]);
+                while (leg > .001f && next <= walked + leg)
+                {
+                    if (length - next > spacing * .5f) stations.Add(Vector3.Lerp(spine[i - 1], spine[i], (next - walked) / leg));
+                    next += spacing;
+                }
+                walked += leg;
+            }
+            stations.Add(spine[spine.Count - 1]);
+            rows = stations.Count;
+            for (int r = 0; r < rows; r++)
+            {
+                Vector3 along = stations[Mathf.Min(r + 1, rows - 1)] - stations[Mathf.Max(r - 1, 0)];
+                along.y = 0;
+                along = along.sqrMagnitude > .0001f ? along.normalized : Vector3.forward;
+                sideways.Add(new Vector3(along.z, 0, -along.x));
+            }
+        }
+
+        // One point of the band. It starts narrow at the dog and widens, and stays wide right up to the far end: coming in
+        // from the side or from behind means reaching the target from anywhere around it.
+        private void SampleOne()
+        {
+            if (sampleRow >= rows)
+            {
+                start = grid[Sides]; goal = grid[(rows - 1) * (Sides * 2 + 1) + Sides];
+                BeginSearch();
+                return;
+            }
+            int column = sampleColumn - Sides;
+            bool wanted = Mathf.Abs(column) * spacing <= spacing * 2 + sampleRow * spacing * .8f;
+            if (wanted)
+            {
+                Vector3 centre = stations[sampleRow];
+                Vector3 p = centre;
+                bool ok = column == 0 || (world.Snap(centre + sideways[sampleRow] * (column * spacing), spacing * .45f, out p) && Mathf.Abs(p.y - centre.y) < 2f);
+                if (ok)
+                {
+                    float seen = Exposure(world, p, eyes);
+                    float price = 1 + ExposedCost * seen * (Flat(p, stations[rows - 1]) < RushZone ? .35f : 1f);
+                    for (int i = 0; i < eyes.Count; i++)
+                        if (!eyes[i].Prey && (eyes[i].Eye - p).sqrMagnitude < CloseToOtherEnemy * CloseToOtherEnemy) { price += OtherEnemyCost; break; }
+                    if (world.EdgeDistance(p) < EdgeHug) price -= EdgeBonus;
+                    grid[sampleRow * (Sides * 2 + 1) + sampleColumn] = nodes.Count;
+                    nodes.Add(new Node { P = p, Cost = price, Exposure = seen, Row = sampleRow, Column = sampleColumn });
+                }
+            }
+            if (++sampleColumn > Sides * 2) { sampleColumn = 0; sampleRow++; }
+        }
+
+        private void BeginSearch()
+        {
+            int n = nodes.Count;
+            cost = new float[n]; came = new int[n]; closed = new bool[n];
+            for (int i = 0; i < n; i++) { cost[i] = float.MaxValue; came[i] = -1; }
+            cost[start] = 0;
+            Push(Remaining(start), start);
+            stage = Stage.Searching;
+        }
+
+        private float Remaining(int node) => Flat(nodes[node].P, nodes[goal].P) * CheapestMetre;
+
+        private void Push(float priority, int node)
+        {
+            open.Add(new KeyValuePair<float, int>(priority, node));
+            int i = open.Count - 1;
+            while (i > 0)
+            {
+                int up = (i - 1) / 2;
+                if (open[up].Key <= open[i].Key) break;
+                KeyValuePair<float, int> swap = open[up]; open[up] = open[i]; open[i] = swap;
+                i = up;
+            }
+        }
+
+        private int Pop()
+        {
+            int top = open[0].Value, end = open.Count - 1;
+            open[0] = open[end]; open.RemoveAt(end);
+            int i = 0;
+            while (true)
+            {
+                int l = i * 2 + 1, r = l + 1, least = i;
+                if (l < end && open[l].Key < open[least].Key) least = l;
+                if (r < end && open[r].Key < open[least].Key) least = r;
+                if (least == i) break;
+                KeyValuePair<float, int> swap = open[least]; open[least] = open[i]; open[i] = swap;
+                i = least;
+            }
+            return top;
+        }
+
+        private void SearchOne()
+        {
+            if (open.Count == 0) { Finish(Plain); return; }   // no way through the band: the plain path it is
+            int at = Pop();
+            if (closed[at]) return;
+            closed[at] = true;
+            if (at == goal) { Collect(); return; }
+            Node here = nodes[at];
+            for (int dr = -2; dr <= 2; dr++)
+            {
+                int row = here.Row + dr;
+                if (row < 0 || row >= rows) continue;
+                for (int dc = -2; dc <= 2; dc++)
+                {
+                    if (dr == 0 && dc == 0) continue;
+                    // Next rows for the most part; the second row out only straight on, to step over a gap.
+                    if (Mathf.Abs(dr) == 2 && dc != 0) continue;
+                    int column = here.Column + dc;
+                    if (column < 0 || column > Sides * 2) continue;
+                    int next = grid[row * (Sides * 2 + 1) + column];
+                    if (next < 0 || closed[next]) continue;
+                    Node there = nodes[next];
+                    float length = Vector3.Distance(here.P, there.P);
+                    float through = cost[at] + length * (here.Cost + there.Cost) * .5f;
+                    if (through >= cost[next] || !world.CanWalk(here.P, there.P)) continue;
+                    cost[next] = through; came[next] = at;
+                    Push(through + Remaining(next), next);
+                }
+            }
+        }
+
+        private void Collect()
+        {
+            found.Clear();
+            for (int at = goal; at >= 0; at = came[at]) found.Add(at);
+            found.Reverse();
+            smoothed.Clear(); smoothed.Add(nodes[found[0]].P);
+            smoothAt = 0;
+            stage = Stage.Smoothing;
+        }
+
+        // Straightens the route where that doesn't mean walking somewhere it can be seen and it wasn't before.
+        private void SmoothOne()
+        {
+            int last = found.Count - 1;
+            if (smoothAt >= last) { Finish(smoothed.ToArray()); return; }
+            int reach = Mathf.Min(smoothAt + 5, last);
+            Node from = nodes[found[smoothAt]];
+            int best = smoothAt + 1;
+            for (int k = reach; k > smoothAt + 1; k--)
+            {
+                Node to = nodes[found[k]];
+                float worst = 0;
+                for (int i = smoothAt; i <= k; i++) worst = Mathf.Max(worst, nodes[found[i]].Exposure);
+                if (world.CanWalk(from.P, to.P) && Exposure(world, Vector3.Lerp(from.P, to.P, .5f), eyes) <= worst + .05f) { best = k; break; }
+            }
+            smoothed.Add(nodes[found[best]].P);
+            smoothAt = best;
+        }
+
+        private void Finish(Vector3[] route)
+        {
+            Points = route;
+            stage = Stage.Done;
+        }
+
+        private static float Flat(Vector3 a, Vector3 b)
+        {
+            a.y = b.y = 0;
+            return Vector3.Distance(a, b);
+        }
+    }
+
+    // Bullets from players and AI reach any BallisticCollider on the HitCollider layer; Body material gives the usual blood impact.
+    internal sealed class DogHitbox : BallisticCollider
+    {
+        private Companion owner;
+        private float multiplier;
+
+        internal void Init(Companion companion, float damageMultiplier)
+        {
+            owner = companion; multiplier = damageMultiplier;
+            TypeOfMaterial = MaterialType.Body;
+            PenetrationChance = 0; RicochetChance = 0; FragmentationChance = 0; TrajectoryDeviationChance = 0;
+        }
+
+        public override PlayerHitInfo ApplyHit(DamageInfo damageInfo, ShotId shotID)
+        {
+            base.ApplyHit(damageInfo, shotID);
+            if (owner != null) owner.TakeHit(damageInfo, multiplier);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// What each jacket tier does for the dog in a raid. The jackets are containers, not the game's armour items, so the
+    /// protection is applied by the dog's own hit handling (Companion.TakeHit): rounds that hit the chest or back are
+    /// stopped or let through EFT-style, by armour class against the round's penetration, and wear the jacket down. Heavier
+    /// tiers slow the dog. Same tiers as the server mod's gear list (sizes, weights and prices live there).
+    /// </summary>
+    internal static class DogArmour
+    {
+        internal sealed class Tier
+        {
+            public int Class; public float Speed, Durability;
+            public Tier(int armourClass, float speed, float durability) { Class = armourClass; Speed = speed; Durability = durability; }
+        }
+
+        private static readonly Dictionary<string, Tier> Tiers = new Dictionary<string, Tier>
+        {
+            ["6a5d0c0c4fb9a3c5e1d0d061"] = new Tier(0, 1.00f, 0),    // tactical chest rig (black)
+            ["6a5d0c0c4fb9a3c5e1d0d073"] = new Tier(3, .95f, 40),    // pocket vest (black)
+            ["6a5d0c0c4fb9a3c5e1d0d071"] = new Tier(4, .91f, 50),    // tactical vest (olive)
+            ["6a5d0c0c4fb9a3c5e1d60020"] = new Tier(5, .93f, 75),    // elite assault vest (camo): heavy protection, light build
+            ["6a5d0c0c4fb9a3c5e1d60021"] = new Tier(4, .92f, 55),    // camera vest (coyote): full length, own camera
+            // Taken out in 0.20 (the server swaps them for the vests above at game start); as they were till then.
+            ["6a5d0c0c4fb9a3c5e1d0d074"] = new Tier(2, .98f, 30),
+            ["6a5d0c0c4fb9a3c5e1d0d072"] = new Tier(5, .86f, 60),
+        };
+
+        // Repairs at the kennel (Working Dog Station and up): durability one item of each material puts back. Fabric
+        // jackets (class 2-3) take any of them; the armoured tiers (class 4-5) only aramid or Cordura. Every repair costs
+        // the jacket a little of its maximum (a tenth of what was put back), as armour repairs do in the game.
+        internal static readonly Dictionary<string, float> RepairMaterials = new Dictionary<string, float>
+        {
+            ["5e2af4d286f7746d4159f07a"] = 25,   // Aramid fiber fabric
+            ["5e2af41e86f774755a234b67"] = 15,   // Cordura polyamide fabric
+            ["5e2af4a786f7746d3f3c3400"] = 10,   // Ripstop fabric
+            ["5e2af29386f7746d4159f077"] = 6,    // KEKTAPE duct tape
+        };
+        internal const float RepairWear = .1f;
+
+        internal static bool Repairs(Tier tier, string material)
+            => tier != null && tier.Class > 0 && RepairMaterials.ContainsKey(material)
+               && (tier.Class <= 3 || material == "5e2af4d286f7746d4159f07a" || material == "5e2af41e86f774755a234b67");
+
+        internal static Tier Of(Item jacket) => jacket != null && Tiers.TryGetValue(jacket.TemplateId.ToString(), out Tier t) ? t : null;
+
+        /// <summary>
+        /// The jacket's durability as the game shows it (inspect window, item tooltip), set to the dog's wear on it: the
+        /// game's own copy of the item only knows its template's full value.
+        /// </summary>
+        internal static void ShowWear(Item jacket)
+        {
+            Tier tier = Of(jacket);
+            RepairableComponent repairable = (jacket as Vest)?.Repairable;
+            if (tier == null || tier.Class <= 0 || repairable == null) return;
+            K9.Wear wear = K9.WearOf(jacket.Id.ToString(), tier.Durability);
+            repairable.MaxDurability = wear.Max;
+            repairable.Durability = wear.Now;
+        }
+
+        /// <summary>
+        /// Chance a round gets through: certain well above the armour, unlikely well below it, about 60% when evenly
+        /// matched; worn armour counts for less (down to half its class at zero durability).
+        /// </summary>
+        internal static float PenetrationChance(int armourClass, float durability, float maxDurability, float penetration)
+        {
+            if (armourClass <= 0 || maxDurability <= 0 || durability <= 0) return 1;
+            float armour = armourClass * 10f * (.5f + .5f * durability / maxDurability);
+            float margin = (penetration - armour) / 15f;
+            return margin >= 0 ? .6f + .4f * Clamp01(margin) : .6f * (1 - Clamp01(-margin));
+        }
+
+        // Durability lost to one round: its penetration scaled by its armour-damage rating (as a percentage).
+        internal static float Wear(float penetration, float armourDamage)
+            => System.Math.Max(1f, penetration * (armourDamage > 0 ? armourDamage / 100f : .5f) * .5f);
+
+        private static float Clamp01(float v) => v < 0 ? 0 : v > 1 ? 1 : v;
     }
 }
