@@ -30,6 +30,12 @@ namespace K9Companion
 
         public const float DefaultHealth = 300f, DefaultBites = 2.5f, DefaultBossBites = 4f, DefaultEngage = 25f, DefaultCooldown = 1.5f;
 
+        // How much of its health a downed dog gets back when it's revived; another treatment does the rest.
+        public const float RevivePercent = 35f;
+
+        // Speed with a load in its jacket: full speed up to the limit, then slower in proportion, never below half. No limit at 0.
+        public static float CarrySpeed(float load, float limit) => limit <= 0 || load <= limit ? 1f : Math.Max(.5f, limit / load);
+
         public static DogRules Resolve(bool combatMode, Aggression aggression,
                                        float engageDistance, float bitesToKill, float bossBitesToKill, float health, bool inRaid,
                                        float biteCooldown = DefaultCooldown)

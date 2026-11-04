@@ -125,7 +125,8 @@ namespace K9Companion
                 decor?.SetHead(hideout ? DogGear.HeadLook(owner.Profile) : DogGear.RaidHead);
                 decor?.SetCamera(hideout ? DogGear.CameraLook(owner.Profile) != null : DogGear.RaidCamera != null);
                 decor?.SetCosmetics(hideout ? DogGear.CollarStyle(owner.Profile) : DogGear.RaidCollar);
-                jacketSpeed = hideout ? 1 : DogArmour.Of(jacket)?.Speed ?? 1;   // heavier armour slows the dog in a raid
+                // Heavier armour slows the dog in a raid, and so does more in its jacket than the carry limit.
+                jacketSpeed = hideout || jacket == null ? 1 : (DogArmour.Of(jacket)?.Speed ?? 1) * DogRules.CarrySpeed(jacket.TotalWeight, Plugin.CarryLimitNow);
             }
             if (Time.time >= nextWhine)
             {
@@ -140,7 +141,7 @@ namespace K9Companion
         internal void PetDog(Player owner)
         {
             if (dog == null || owner == null) return;
-            if (dead) { Say(Plugin.DogName.Value + " is dead."); return; }
+            if (dead) { Say(DeadNote + "."); return; }
             if (Vector3.Distance(owner.Transform.position, dog.transform.position) > 2.5f) { Say("Move closer to pet your dog."); return; }
             Reach(owner);
             WakeUp(); roaming = false; actionClip = "Sitting_02"; actionUntil = Time.time + 7;

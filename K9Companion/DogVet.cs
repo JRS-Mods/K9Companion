@@ -118,7 +118,8 @@ namespace K9Companion
         internal static bool? CombatMode;
         internal static DogApproach? Approach;
         internal static Aggression? Aggression;
-        internal static float? EngageDistance, OrderRange, BitesToKill, BossBitesToKill, BiteCooldown, BiteStagger, DogHealth, AutoRushRange, DefendRange;
+        internal static bool? SoloOnly, DownedMode;
+        internal static float? EngageDistance, OrderRange, BitesToKill, BossBitesToKill, BiteCooldown, BiteStagger, DogHealth, AutoRushRange, DefendRange, BleedOutTime, CarryLimit;
         private static string applied = "{}";
         private static bool complained;
 
@@ -153,6 +154,10 @@ namespace K9Companion
             BiteCooldown = s["biteCooldown"]?.Value<float?>();
             BiteStagger = s["biteStagger"]?.Value<float?>();
             DogHealth = s["dogHealth"]?.Value<float?>();
+            SoloOnly = s["soloOnly"]?.Value<bool?>();
+            DownedMode = s["downedMode"]?.Value<bool?>();
+            BleedOutTime = s["bleedOutTime"]?.Value<float?>();
+            CarryLimit = s["carryLimit"]?.Value<float?>();
             Plugin.Log.LogInfo(s.Count == 0 ? "Server's dog settings: none, every player uses their own." : "Server's dog settings (for everyone): " + json);
         }
     }

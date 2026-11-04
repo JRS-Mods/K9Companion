@@ -19,6 +19,9 @@ namespace K9Companion
         private bool combatWas;
         private float health;
         private bool dead;
+        // Dead to everything else (no orders, no hits, reported as killed), but a veterinary kit can still bring it back.
+        private bool downed;
+        private float downedUntil, nextDownedCall;
         private Transform interactZone;
         private string armourFor;
         private float armourLeft, jacketSpeed = 1;
@@ -70,6 +73,8 @@ namespace K9Companion
         internal float HealthNow => health;
         internal float HealthMax => rules.Health;
         internal bool IsDead => dead;
+        internal bool Downed => downed;
+        private string DeadNote => Plugin.DogName.Value + (downed ? " is down" : " is dead");
         internal float DistanceTo(Player player) => dog == null || player == null ? float.MaxValue : Vector3.Distance(dog.transform.position, player.Transform.position);
         internal Player Owner => CurrentPlayer;
         internal bool Resting => stance != Stance.Stand || shownSpeed < .15f;
@@ -229,6 +234,7 @@ namespace K9Companion
         private void Die(bool fromLeft)
         {
             dead = true; health = 0; hitClip = null; actionClip = null; speed = shownSpeed = 0;
+            downed = Plugin.Downable && !IsHideout;
             RecordHealth();
             K9.DogDied();
             CancelTasks();
@@ -239,10 +245,65 @@ namespace K9Companion
             bodyPitch = 0; if (model?.Root != null) model.Root.localRotation = Quaternion.identity;
             LayAlongGround();
             audio?.Play("whine");
-            Say(Plugin.DogName.Value + " has been killed.");
+            string name = Plugin.DogName.Value;
+            if (downed)
+            {
+                float time = Plugin.BleedOut;
+                downedUntil = time > 0 ? Time.time + time : 0;
+                nextDownedCall = Time.time + DownedCallEvery;
+                string left = time > 0 ? $" You have {Mathf.RoundToInt(time)} s." : "";
+                Say($"{name} is down: revive it with a K9 veterinary kit.{left}");
+                EFT.Communications.NotificationManager.DisplayWarningNotification($"{name} is down: revive it with a K9 veterinary kit.{left}");
+            }
+            else Say(name + " has been killed.");
             // Whatever is still in its bag when the raid ends is lost; anything you take out first is yours.
             if (!IsHideout && (DogBag.FindInRaid(CurrentPlayer) != null || DogGear.RaidHead != null || DogGear.RaidCamera != null)) DogBag.DogDied();
-            Plugin.Log.LogInfo("Companion killed.");
+            Plugin.Log.LogInfo(downed ? "Companion down." : "Companion killed.");
+        }
+
+        private const float DownedCallEvery = 20f;
+
+        // Lying where it fell, waiting for you: the treatment runs from here, as nothing else does for a dead dog.
+        private void TickDowned(Player owner)
+        {
+            if (treatItem != null)
+            {
+                if (Vector3.Distance(owner.Transform.position, dog.transform.position) > HandReach + 1f) StopTreatment();
+                else
+                {
+                    if (downedUntil > 0) downedUntil += Time.deltaTime;
+                    if (treatStart > 0 && Time.time >= treatStart) Kneel(owner);
+                    if (treatItem != null && treatStart <= 0 && Time.time >= treatUntil) TreatmentEnded(true);
+                    return;
+                }
+            }
+            string name = Plugin.DogName.Value;
+            if (downedUntil > 0 && Time.time >= downedUntil)
+            {
+                downed = false;
+                Say(name + " has died of its wounds.");
+                EFT.Communications.NotificationManager.DisplayWarningNotification(name + " has died of its wounds.");
+                Plugin.Log.LogInfo("Companion died of its wounds.");
+                return;
+            }
+            if (Time.time < nextDownedCall) return;
+            nextDownedCall = Time.time + DownedCallEvery;
+            audio?.Play("whine");
+            Say(downedUntil > 0 ? $"{name} is down: {Mathf.CeilToInt(downedUntil - Time.time)} s left to revive it." : name + " is down: revive it with a K9 veterinary kit.");
+        }
+
+        // Revived: on the ground it fell on, lying down, and up from there like any other time it's called.
+        private void GetUp()
+        {
+            dead = downed = false;
+            hitClip = deathClip = deathPose = null;
+            dog.transform.rotation = Quaternion.Euler(0, yaw, 0);
+            if (GroundAt(dog.transform.position, out Vector3 ground)) dog.transform.position = ground;
+            stance = Stance.Lying;
+            idle = 0; lastProgress = Time.time;
+            K9.DogRevived();
+            DogBag.DogRevived();
+            Plugin.Log.LogInfo("Companion revived.");
         }
 
         // The fall is animated on level ground. On a slope the body is first tilted to lie along the ground under it
@@ -282,7 +343,8 @@ namespace K9Companion
         }
 
         // Applies the shared rules. CombatMode off means no attacking and no damage for a living dog. Death is final for
-        // the raid: no setting change brings the dog back, and switching modes never refills its health.
+        // the raid: no setting change brings the dog back, and switching modes never refills its health (only a veterinary
+        // kit brings back a downed dog).
         private void SyncRules()
         {
             rules = Plugin.Rules(IsHideout);
@@ -302,6 +364,7 @@ namespace K9Companion
             {
                 if (deathClip != null && model.Tick(deathClip, 1, dt, false)) { deathClip = null; LiftOutOfGround(); }
                 if (deathClip == null) model.Tick(deathPose, 1, dt);
+                if (downed) TickDowned(owner);
                 return true;
             }
             if (hitboxes != null)

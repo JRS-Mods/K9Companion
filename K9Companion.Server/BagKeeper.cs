@@ -136,6 +136,16 @@ public sealed class BagKeeper(ISptLogger<BagKeeper> logger, ProfileHelper profil
         return Ok;
     }
 
+    // A downed dog is reported as dead at once, so that a raid ending or a crash counts as that; this takes it back.
+    public string DogRevived(MongoId sessionId)
+    {
+        PmcData? pmc = profiles.GetPmcProfile(sessionId);
+        if (pmc == null) return Refused;
+        BagRecord record = Load(pmc);
+        if (record.DogDied) { record.DogDied = false; Save(pmc, record); }
+        return Ok;
+    }
+
     // ---- server events --------------------------------------------------------------------------------------
 
     public void GameStarted(MongoId sessionId)

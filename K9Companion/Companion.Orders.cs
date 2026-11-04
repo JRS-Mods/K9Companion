@@ -39,7 +39,7 @@ namespace K9Companion
             else if (order == DogOrder.Feed || order == DogOrder.Water) why = NeedsUnavailable(order);
             else if (order == DogOrder.AttackMode) why = !Plugin.Combat ? "needs combat mode" : ServerRules.Aggression != null ? "set by the server" : null;
             else if (order == DogOrder.ApproachMode) why = !Plugin.Combat ? "needs combat mode" : ServerRules.Approach != null ? "set by the server" : null;
-            else why = dog == null ? "No dog" : dead ? Plugin.DogName.Value + " is dead" : rules.Unavailable(order, IsHideout);
+            else why = dog == null ? "No dog" : dead ? DeadNote : rules.Unavailable(order, IsHideout);
             return why == null;
         }
 

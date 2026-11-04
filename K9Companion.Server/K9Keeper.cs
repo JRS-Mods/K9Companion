@@ -135,6 +135,16 @@ public sealed class K9Keeper(ISptLogger<K9Keeper> logger, ProfileHelper profiles
         return "{\"ok\":true}";
     }
 
+    // A downed dog is reported as dead at once, so that a raid ending or a crash counts as that; this takes it back.
+    public string DogRevived(MongoId sessionId)
+    {
+        PmcData? pmc = profiles.GetPmcProfile(sessionId);
+        K9State? state = store.Load(pmc);
+        if (pmc == null || state == null) return "{\"ok\":false}";
+        if (state.Raid.DogDied) { state.Raid.DogDied = false; store.Save(pmc, state); }
+        return "{\"ok\":true}";
+    }
+
     // ---- server events ----------------------------------------------------------------------------------------
 
     /// <summary>Before the game checks the profile (and drops quests that no longer exist): the questline migration.</summary>

@@ -62,7 +62,7 @@ namespace K9Companion
             kennelHome = kennel;
             try
             {
-                if (screen == null && Time.unscaledTime >= nextLook) { nextLook = Time.unscaledTime + 1; screen = UnityEngine.Object.FindObjectOfType<HideoutScreenRear>(); }
+                if (screen == null && Time.unscaledTime >= nextLook) { nextLook = Time.unscaledTime + 1; screen = UnityEngine.Object.FindObjectOfType<HideoutScreenRear>(true); }
                 if (screen == null || !screen.isActiveAndEnabled) return;
                 if (panel == null && !Create()) return;
                 Bar(level);

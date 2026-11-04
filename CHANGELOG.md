@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.1.1
+
+Needs SPT 4.1.x. Install over 1.1.0 and restart the SPT server; your dog, kennel and quest progress carry over. With Fika, everyone needs this version.
+
+### Added
+
+All of these are off by default. Server owners can set them for everyone in `SPT_Runtime/user/mods/K9Companion.Server/config.jsonc`.
+
+- **Downed instead of killed** (Combat): when the dog's health runs out in a raid it collapses instead of dying. Revive it with a K9 veterinary kit, by looking at it and pressing your interact key or by using the kit, and it gets up at 35% health. You have 180 seconds by default (Combat > Downed: time to revive), enemies leave it alone while it's down, and only its owner can revive it. If time runs out or the raid ends first, it counts as killed.
+- **Solo raids only** (General): the dog stays home whenever anyone else is in the raid. A headless host doesn't count as a player. The F12 setting covers your own dog; `soloOnly` in `config.jsonc` covers every dog on the server. A host can't always tell before everyone has joined, so the dog may only be called off as the raid starts. Its jacket then stays with your gear for that raid: it comes back when you extract and is lost if you die.
+- **Carry limit (kg)** (Movement): above this weight, jacket and contents together, the dog slows in proportion, down to half speed at most. Nothing is blocked or dropped.
+
+### Fixed
+
+- **No more small freeze every 2 seconds in the menus.** If you owned the dog, the mod searched the whole game for the hideout player until you first entered the hideout. It now only looks once the hideout has started loading.
+
 ## 1.1.0
 
 Needs SPT 4.1.x. Install over 1.0.0; your dog, kennel and quest progress carry over.

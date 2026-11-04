@@ -99,6 +99,13 @@ namespace K9Companion
             Companion dog = target.Dog;
             CompoundItem jacket = DogBag.FindInRaid(player);
             var state = new AvailableInteractionState();
+            if (dog != null && dog.Downed)
+            {
+                Item kit = dog.ReviveKit(player);
+                string why = kit == null ? "no K9 veterinary kit" : dog.TreatProblem(kit);
+                string name = "Revive " + Plugin.DogName.Value;
+                state.Actions.Add(new InteractionAction { Name = why == null ? name : name + ": " + why, Disabled = why != null, Action = () => DogVet.Use(kit) });
+            }
             state.Actions.Add(new InteractionAction
             {
                 // Named for what it is: "Open chest rig", "Open camera vest".

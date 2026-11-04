@@ -35,6 +35,8 @@ namespace K9Companion
     {
         bool Online { get; }
         bool Headless { get; }
+        // More than one person in this raid (a headless host doesn't count).
+        bool InGroup { get; }
         // A bot being run by the host, seen here as Fika's copy of it: no brain on this machine.
         bool IsRemoteBot(Player player);
         int NetIdOf(Player player);
@@ -65,6 +67,16 @@ namespace K9Companion
         internal static bool Installed => Chainloader.PluginInfos.ContainsKey(FikaId);
         internal static bool Online => link != null && link.Online;
         internal static bool Headless => link != null && link.Headless;
+
+        internal static bool InGroup
+        {
+            get
+            {
+                if (link == null) return false;
+                try { return link.InGroup; }
+                catch (Exception) { return false; }
+            }
+        }
 
         internal static void Load()
         {

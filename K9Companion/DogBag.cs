@@ -15,7 +15,7 @@ namespace K9Companion
     /// </summary>
     internal static class DogBag
     {
-        private const string StartRoute = "/k9companion/bag/raid-start", DogDiedRoute = "/k9companion/bag/dog-died";
+        private const string StartRoute = "/k9companion/bag/raid-start", DogDiedRoute = "/k9companion/bag/dog-died", DogRevivedRoute = "/k9companion/bag/dog-revived";
 
         internal static void Patch(Harmony harmony)
         {
@@ -115,6 +115,13 @@ namespace K9Companion
         {
             try { RequestHandler.PostJson(DogDiedRoute, "{}"); }
             catch (Exception e) { Plugin.Log.LogWarning("Couldn't tell the server the dog died: " + e.Message); }
+        }
+
+        // A downed dog was reported as dead (so a raid ending, or a crash, counts as just that), and has been brought back.
+        internal static void DogRevived()
+        {
+            try { RequestHandler.PostJson(DogRevivedRoute, "{}"); }
+            catch (Exception e) { Plugin.Log.LogWarning("Couldn't tell the server the dog was revived: " + e.Message); }
         }
     }
 }

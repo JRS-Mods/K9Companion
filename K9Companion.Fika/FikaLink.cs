@@ -134,6 +134,19 @@ namespace K9Companion.Fika
 
         public bool Headless => FikaBackendUtils.IsHeadless;
 
+        public bool InGroup
+        {
+            get
+            {
+                if (!FikaBackendUtils.IsServer && !FikaBackendUtils.IsClient) return false;
+                // Joined someone else's raid (a headless host is nobody): there's someone else, whatever the count says yet.
+                if (FikaBackendUtils.IsClient && !FikaBackendUtils.IsHeadlessGame) return true;
+                if (network == null) return false;
+                // The count includes a headless host, which doesn't play.
+                return network.PlayerAmount - (FikaBackendUtils.IsHeadless || FikaBackendUtils.IsHeadlessGame ? 1 : 0) > 1;
+            }
+        }
+
         public bool IsRemoteBot(Player player) => player is ObservedPlayer copy && copy.IsObservedAI;
 
         public int NetIdOf(Player player) => player is FikaPlayer fika ? fika.NetId : -1;

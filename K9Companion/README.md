@@ -27,6 +27,8 @@ Settings (Movement section): FollowDistance (2 m), RunDistance (6 m), SprintDist
 
 **Fika.** Everyone in the raid needs this mod (same version). Each player's game runs that player's own dog, and everyone else sees it, in its gear, and hears it. Bots on the host notice and shoot other players' dogs just as they do yours. A bite on a bot counts as yours (Fika's own damage messages carry it), the bot staggers and turns on the dog, and only the host decides which bots are hostile, so it's the same answer the bots themselves use. Team-mates' rounds don't hurt your dog. The dog's CONFIRMATION-screen panel stays hidden while Fika is installed, as Fika's server browser takes over that screen: TAKE DOG is the config's General > Enabled (F12). The file K9Companion.Fika.dll is only ever loaded when Fika is installed; a host or player without the mod just doesn't see dogs, and nothing is sent to them. Nothing here goes through the SPT server: bots and navigation only exist in the game itself.
 
+**Solo raids only.** With General > Solo raids only on, your dog stays home whenever anyone else is in the raid (a headless host doesn't count). That's your dog only: to keep every dog out of group raids, the server's owner sets `soloOnly` to `true` in `config.jsonc`. A host can't always tell before everyone has joined, so the dog may only be called off as the raid starts; its jacket, if it has one, then stays with your gear for that raid and goes back to the stash when you get out.
+
 **SAIN and ORBIT.** The dog is one more layer in each bot's brain: above their combat layers and below their avoid-danger ones, so they carry on as usual until a bot notices the dog. Bots that ORBIT has parked or switched off aren't hunted, watched for or bitten. Other AI mods that add brain layers the same way (Questing Bots, Looting Bots) should behave the same, but haven't been checked. If another mod's damage handling throws an error, that bite is lost, not the dog.
 
 **Navigation-mesh mods** (Waypoints): the dog asks whichever navigation mesh is there. **Spawn mods** only change who's about, so they shouldn't matter.
@@ -35,9 +37,13 @@ Settings (Movement section): FollowDistance (2 m), RunDistance (6 m), SprintDist
 
 On the left: the dog itself in the gear it wears (drag to turn it; in a raid its outline), its head and collar slots, its load, health, thirst and hunger, the care buttons and how it behaves (combat, when to attack, and stealth, direct or auto). On the right: its jacket slot with the jacket's grid, what the jacket gives (armour class, durability, speed), and the kennel with its upgrades and jacket presets. Each button says underneath what it has to work with, or what it's waiting for. In a raid HEAL DOG still works, and treats the dog beside you.
 
+## Carry limit
+
+The jackets have slots but no weight limit, and what the dog carries never counts towards your own weight. Movement > Carry limit (kg) adds a limit: above it (jacket and contents together) the dog slows in proportion, down to half speed at most. Nothing is blocked or dropped. 0 (the default) means no limit.
+
 ## Settings for everyone on a server
 
-The owner of the SPT server can fix dog settings for all its players in `SPT_Runtime/user/mods/K9Companion.Server/config.jsonc` (made the first time the server starts): combat mode, aggression, approach, Auto's rush distance, defend range, engagement distance, ordered range, bites to kill (and for bosses), bite cooldown and stagger, and dog health. Each one left `null` stays each player's own setting. With Fika that means everyone in the raid plays by the same rules, as they all use the same SPT server. Saved changes count from each player's next raid, with no restart. In the DOG tab a fixed setting is marked (SERVER), and F12 changes to it do nothing. A mistake in the file fixes nothing, and the server log says what's wrong.
+The owner of the SPT server can fix dog settings for all its players in `SPT_Runtime/user/mods/K9Companion.Server/config.jsonc` (made the first time the server starts): combat mode, aggression, approach, Auto's rush distance, defend range, engagement distance, ordered range, bites to kill (and for bosses), bite cooldown and stagger, dog health, solo raids only, the downed state and its time limit, and the carry limit. Each one left `null` stays each player's own setting. With Fika that means everyone in the raid plays by the same rules, as they all use the same SPT server. Saved changes count from each player's next raid, with no restart. In the DOG tab a fixed setting is marked (SERVER), and F12 changes to it do nothing. A mistake in the file fixes nothing, and the server log says what's wrong.
 
 ## Combat settings (Combat section of the config)
 
@@ -55,6 +61,8 @@ Everything combat-related is decided in one place (DogRules), so no setting can 
 | Bites to kill a boss | 4 | The same for bosses (1-20). |
 | Bite cooldown | 1.5 s | Time between bites (0.8-5). |
 | Dog health | 300 | Hit points per raid in combat mode (30-1000). An untouched old default of 150 is raised to 300 once. |
+| Downed instead of killed | Off | At 0 health the dog collapses instead of dying. Revive it with a K9 veterinary kit (look at it and press your interact key, or use the kit) and it gets up at 35% health. Enemies leave it alone while it's down. Only you can revive your dog. If time runs out or the raid ends first, it counts as killed: its gear is lost and it comes home in critical condition. |
+| Downed: time to revive | 180 | Seconds to revive a downed dog (0-600). Treating it stops the clock. 0 = as long as the raid lasts. |
 | Bite stagger | 0.5 s | How long a bitten enemy is thrown off (0 turns it off). |
 | Audio > Volume | 0.35 | Dog sound volume. |
 

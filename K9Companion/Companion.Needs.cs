@@ -87,7 +87,7 @@ namespace K9Companion
             Player owner = CurrentPlayer;
             string name = Plugin.DogName.Value;
             if (dog == null || owner == null || needs == null) return "No dog.";
-            if (dead) return name + " is dead.";
+            if (dead) return DeadNote + ".";
             if (!NeedsOn) return "Survival needs are off.";
             if (meal != MealSource.None) return name + " is already eating.";
             if (!DogPantry.Carried(owner, item) || DogPantry.ValueOf(item, food) <= 0) return "That can't be given to the dog.";
@@ -158,7 +158,7 @@ namespace K9Companion
         {
             if (!NeedsOn) return "Survival needs are off";
             if (needs == null || dog == null) return "No dog";
-            if (dead) return Plugin.DogName.Value + " is dead";
+            if (dead) return DeadNote;
             bool food = order == DogOrder.Feed;
             if (DogPantry.Best(CurrentPlayer, IsHideout, food, 1) == null) return food ? "No dog food or meat" : "No water";
             return null;

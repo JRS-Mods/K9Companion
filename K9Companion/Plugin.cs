@@ -16,7 +16,7 @@ namespace K9Companion
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id = "jrs.k9companion";
-        public const string Version = "1.1.0";
+        public const string Version = "1.1.1";
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> Active, CombatMode, SurvivalNeeds, AutoFeedInHideout, CarryOverInjuries;
         internal static ConfigEntry<DogApproach> ApproachMode;
@@ -39,6 +39,8 @@ namespace K9Companion
         internal static ConfigEntry<float> Volume, BreathingVolume;
         internal static ConfigEntry<KeyboardShortcut> Stay, Lie, Rename, Pet, Feed, Water, DogCamKey;
         internal static ConfigEntry<bool> DogCamShow;
+        internal static ConfigEntry<bool> SoloRaidsOnly, DownedInsteadOfKilled;
+        internal static ConfigEntry<float> BleedOutTime, CarryLimit;
         internal static ConfigEntry<float> DogCamSize;
         internal static ConfigEntry<int> DogCamFps;
         internal static ConfigEntry<DogCamQuality> DogCamQuality;
@@ -53,6 +55,9 @@ namespace K9Companion
         {
             Log = Logger; instance = this;
             Active = Config.Bind("General", "Enabled", true, "Spawn your companion in raids.");
+            SoloRaidsOnly = Config.Bind("General", "Solo raids only", false,
+                "The dog only comes on raids where you're the only player, and stays home in a Fika group. This is your own dog only: " +
+                "to keep every dog out of group raids, the server's owner sets soloOnly in the server mod's config.jsonc.");
             Distance = Config.Bind("Movement", "FollowDistance", 2f,
                 new ConfigDescription("Where the dog stops beside you, in metres.", new AcceptableValueRange<float>(1.5f, 8f)));
             RunDistance = Config.Bind("Movement", "RunDistance", 6f,
@@ -102,6 +107,12 @@ namespace K9Companion
                 new ConfigDescription("Seconds a bitten enemy is thrown off (loses its aim, shoots badly) before it turns on the dog. 0 turns it off.", new AcceptableValueRange<float>(0f, 3f)));
             DogHealth = Config.Bind("Combat", "Dog health", DogRules.DefaultHealth,
                 new ConfigDescription("Hit points per raid when CombatMode is on.", new AcceptableValueRange<float>(30f, 1000f)));
+            DownedInsteadOfKilled = Config.Bind("Combat", "Downed instead of killed", false,
+                "When the dog's health runs out in a raid it collapses instead of dying, and you can revive it with a K9 veterinary kit " +
+                "(look at it and press your interact key, or use the kit). It gets up at 35% health. Enemies leave it alone while it's down. " +
+                "If it isn't revived in time, or the raid ends first, that counts as the dog being killed.");
+            BleedOutTime = Config.Bind("Combat", "Downed: time to revive", 180f, new ConfigDescription(
+                "Seconds you have to revive a downed dog. Treating it stops the clock. 0 = as long as the raid lasts.", new AcceptableValueRange<float>(0f, 600f)));
             SurvivalNeeds = Config.Bind("Survival", "EnableSurvivalNeeds", true,
                 "Hunger and thirst. They drop slowly while you play, are saved between raids and restarts, and only ever slow the dog down " +
                 "(in combat mode); they never hurt or kill it.");
@@ -116,6 +127,9 @@ namespace K9Companion
                 "Below 25% health the dog stays home. Off: the dog starts every raid at full health, as before 0.16.");
             CombatMode.SettingChanged += (_, __) => Log.LogInfo("Combat mode " + (CombatMode.Value ? "on" : "off") + ": " + Describe(Rules(false)));
             DogAggression.SettingChanged += (_, __) => Log.LogInfo("Dog aggression: " + Describe(Rules(false)));
+            CarryLimit = Config.Bind("Movement", "Carry limit (kg)", 0f, new ConfigDescription(
+                "How much the dog's jacket and what's in it can weigh in a raid before the dog slows down: slower in proportion above it, " +
+                "down to half speed at most. 0 = no limit. What the dog carries never counts towards your own weight.", new AcceptableValueRange<float>(0f, 200f)));
             Scale = Config.Bind("Appearance", "Scale", 1f,
                 new ConfigDescription("Dog size; applied when it spawns.", new AcceptableValueRange<float>(0.5f, 2f)));
             Recall = Config.Bind("Controls", "Recall", new KeyboardShortcut(KeyCode.F8), "Bring the dog back beside you.");
@@ -245,6 +259,10 @@ namespace K9Companion
         internal static float OrderReach => ServerRules.OrderRange ?? OrderRange.Value;
         internal static float Stagger => ServerRules.BiteStagger ?? BiteStagger.Value;
         internal static float MaxHealth => ServerRules.DogHealth ?? DogHealth.Value;
+        internal static bool SoloOnly => ServerRules.SoloOnly ?? SoloRaidsOnly.Value;
+        internal static bool Downable => ServerRules.DownedMode ?? DownedInsteadOfKilled.Value;
+        internal static float BleedOut => ServerRules.BleedOutTime ?? BleedOutTime.Value;
+        internal static float CarryLimitNow => ServerRules.CarryLimit ?? CarryLimit.Value;
 
         private static string Describe(DogRules r) => r.Combat
             ? $"{r.Aggression}, auto-engage {r.AutoEngage}, cooldown {r.BiteCooldown:0.0} s, engage {r.EngageDistance:0} m, bites to kill {r.BitesToKill:0.#} (bosses {r.BossBitesToKill:0.#}), health {r.Health:0}, mortal"
@@ -269,6 +287,14 @@ namespace K9Companion
                     __instance.GetComponent<Companion>() != null) return;
                 bool deployed = DogBag.Deployed ?? K9.NotDeployable() == null;
                 DogBag.Deployed = null;
+                // Fika only knows who's in the raid for certain now: a host decides before everyone has joined. Any jacket
+                // already on its way stays with your gear: back in the stash when you get out, as usual.
+                if (deployed && SoloOnly && DogNet.InGroup)
+                {
+                    deployed = false;
+                    K9.RaidStart(false);
+                    EFT.Communications.NotificationManager.DisplayWarningNotification(DogName.Value + " stays out of this raid: solo raids only.");
+                }
                 if (!deployed) { DogPreload.Release(); Log.LogInfo("No dog this raid (" + (K9.NotDeployable() ?? "not deployed") + ")."); return; }
                 __instance.gameObject.AddComponent<Companion>();
             }
@@ -286,15 +312,17 @@ namespace K9Companion
             if (Companion.Raid == null) K9.Recover();
             if (!Active.Value || !Hideout.Value || Time.unscaledTime < nextHideout) return;
             nextHideout = Time.unscaledTime + 2;
-            // Only in the hideout, and only until its dog is there: what follows searches the whole scene, which in a
-            // raid (a far bigger scene) was a stall every two seconds.
-            if (Companion.Raid != null || (Comfort.Common.Singleton<GameWorld>.Instantiated && !(Comfort.Common.Singleton<GameWorld>.Instance is HideoutGameWorld))) return;
+            // Only in the hideout, and only until its dog is there: what follows searches the whole scene, which was a stall
+            // every two seconds in a raid (a far bigger scene) and in the menus before the hideout had loaded. The game makes
+            // the hideout's world before its player, so without that world there's no player to look for.
+            bool world = Comfort.Common.Singleton<GameWorld>.Instantiated;
+            if (Companion.Raid != null || (world && !(Comfort.Common.Singleton<GameWorld>.Instance is HideoutGameWorld))) return;
             if (hideoutDog != null && hideoutDog.HideoutOwner != null) return;
             // Only a dog you own lives in the hideout. A new handler's ownership is looked up again now and then, so the
             // dog from Trust Is Earned turns up without a restart.
-            if (K9.SessionProfile != null && (!K9.Loaded || (!K9.Owned && Time.unscaledTime >= nextOwnerCheck && FindObjectOfType<HideoutPlayer>() != null)))
+            if (K9.SessionProfile != null && (!K9.Loaded || (world && !K9.Owned && Time.unscaledTime >= nextOwnerCheck)))
             { nextOwnerCheck = Time.unscaledTime + 30; K9.RefreshInBackground(); }
-            if (!K9.Owned) return;
+            if (!world || !K9.Owned) return;
             // Hideout does not share the raid GameWorld/MainPlayer lifecycle.
             // The hideout's player exists (switched off) from the loading screen on, while the overview shows; the dog
             // lives on its own object so it's there before you click Enter.

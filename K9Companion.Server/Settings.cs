@@ -44,6 +44,10 @@ public sealed class DogSettingsFile(ModHelper mods, ISptLogger<DogSettingsFile> 
           "bossBitesToKill": null,   // 1 to 20: the same for bosses.
           "biteCooldown": null,      // 0.8 to 5: seconds between bites.
           "biteStagger": null,       // 0 to 3: seconds a bitten enemy is thrown off for.
+          "soloOnly": null,          // true: dogs only come on raids with one player, so none in a Fika group.
+          "downedMode": null,        // true: a dog out of health collapses and can be revived with a K9 veterinary kit. false: it dies.
+          "bleedOutTime": null,      // 0 to 600: seconds to revive a downed dog (0 = as long as the raid lasts).
+          "carryLimit": null,        // 0 to 200: kg a dog's jacket can weigh before it slows down (0 = no limit).
           "dogHealth": null          // 30 to 1000: a dog's hit points.
         }
         """.Replace("{TraderLine}", TraderLine);
@@ -51,7 +55,7 @@ public sealed class DogSettingsFile(ModHelper mods, ISptLogger<DogSettingsFile> 
     private static readonly JsonDocumentOptions Reading = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
     private static readonly (string Key, double Min, double Max)[] Numbers =
     {
-        ("autoRushRange", 5, 40), ("defendRange", 10, 300), ("engageDistance", 5, 60), ("orderRange", 25, 300), ("bitesToKill", 1, 10), ("bossBitesToKill", 1, 20), ("biteCooldown", .8, 5), ("biteStagger", 0, 3), ("dogHealth", 30, 1000)
+        ("bleedOutTime", 0, 600), ("carryLimit", 0, 200), ("autoRushRange", 5, 40), ("defendRange", 10, 300), ("engageDistance", 5, 60), ("orderRange", 25, 300), ("bitesToKill", 1, 10), ("bossBitesToKill", 1, 20), ("biteCooldown", .8, 5), ("biteStagger", 0, 3), ("dogHealth", 30, 1000)
     };
 
     private string FilePath => System.IO.Path.Combine(mods.GetAbsolutePathToModFolder(Assembly.GetExecutingAssembly()), "config.jsonc");
@@ -98,6 +102,16 @@ public sealed class DogSettingsFile(ModHelper mods, ISptLogger<DogSettingsFile> 
                 "\"bitesToKill\": null,       // 1 to 10: bites to the throat that kill a scav, PMC or player, armour or not (2.5 = two or three).\n" + indent +
                 "\"bossBitesToKill\": null,   // 1 to 20: the same for bosses." + (end < 0 ? "" : text[end..]);
         }
+        int health = text.IndexOf("\"dogHealth\"", StringComparison.Ordinal);
+        if (!text.Contains("\"soloOnly\"") && health >= 0)
+        {
+            string indent = new string(' ', health - (text.LastIndexOf('\n', health) + 1));
+            text = text.Insert(health,
+                "\"soloOnly\": null,          // true: dogs only come on raids with one player, so none in a Fika group.\n" + indent +
+                "\"downedMode\": null,        // true: a dog out of health collapses and can be revived with a K9 veterinary kit. false: it dies.\n" + indent +
+                "\"bleedOutTime\": null,      // 0 to 600: seconds to revive a downed dog (0 = as long as the raid lasts).\n" + indent +
+                "\"carryLimit\": null,        // 0 to 200: kg a dog's jacket can weigh before it slows down (0 = no limit).\n" + indent);
+        }
         File.WriteAllText(FilePath, text);
     }
 
@@ -130,6 +144,12 @@ public sealed class DogSettingsFile(ModHelper mods, ISptLogger<DogSettingsFile> 
                 string? known = new[] { "Passive", "Defensive", "Aggressive" }.FirstOrDefault(a => a.Equals(text, StringComparison.OrdinalIgnoreCase));
                 if (known != null) answer["aggression"] = known;
                 else logger.Warning("[K9Companion] config.jsonc: aggression should be \"Passive\", \"Defensive\", \"Aggressive\" or null; ignored.");
+            }
+            foreach (string key in new[] { "soloOnly", "downedMode" })
+            {
+                if (file[key] is not JsonNode flag) continue;
+                if (flag.GetValueKind() is JsonValueKind.True or JsonValueKind.False) answer[key] = flag.GetValue<bool>();
+                else logger.Warning($"[K9Companion] config.jsonc: {key} should be true, false or null; ignored.");
             }
             foreach (var (key, min, max) in Numbers)
             {

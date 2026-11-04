@@ -28,14 +28,22 @@ namespace K9Companion
             Player owner = CurrentPlayer;
             string name = Plugin.DogName.Value;
             if (dog == null || owner == null) return "No dog.";
-            if (dead) return name + " is dead.";
+            if (dead && !downed) return name + " is dead.";
             if (treatItem != null) return "You're already treating " + name + ".";
-            if (health >= rules.Health - .5f) return name + " isn't hurt.";
+            if (!downed && health >= rules.Health - .5f) return name + " isn't hurt.";
             if (DogVet.Holds(item, 1) <= 0) return "This kit is empty.";
             if (meal != MealSource.None) return name + " is eating.";
             if (attackTarget != null || hitClip != null) return name + " is fighting.";
             if (!DogPantry.Carried(owner, item)) return "Take the kit first.";
-            if (Vector3.Distance(owner.Transform.position, dog.transform.position) > HandReach) return "Call " + name + " over first.";
+            if (Vector3.Distance(owner.Transform.position, dog.transform.position) > HandReach) return downed ? "Get closer to " + name + " first." : "Call " + name + " over first.";
+            return null;
+        }
+
+        // The kit to revive it with: the first one you carry with anything left in it.
+        internal Item ReviveKit(Player owner)
+        {
+            foreach (Item item in DogPantry.Sources(owner, false, false))
+                if (DogVet.IsKit(item) && DogVet.Holds(item, 1) > 0) return item;
             return null;
         }
 
@@ -117,16 +125,19 @@ namespace K9Companion
             treatItem = null;
             string name = Plugin.DogName.Value;
             MedKitComponent kit = item?.GetItemComponent<MedKitComponent>();
-            if (kit == null || item.CurrentAddress == null || dead) { Say("The kit is gone."); return; }
-            VetMath.Portion(kit.HpResource, kit.MaxHpResource, MissingPercent, 1, out float gives, out float use, out bool lastOfIt);
+            if (kit == null || item.CurrentAddress == null || (dead && !downed)) { Say("The kit is gone."); return; }
+            // Reviving only gets it back on its feet: the rest takes another treatment.
+            VetMath.Portion(kit.HpResource, kit.MaxHpResource, downed ? DogRules.RevivePercent : MissingPercent, 1, out float gives, out float use, out bool lastOfIt);
             if (gives <= 0) return;
             void Healed()
             {
+                bool revived = downed;
+                if (revived) GetUp();
                 health = Mathf.Min(rules.Health, health + gives / 100f * rules.Health);
                 // It came into the raid hurt or was hurt in it: this counts when it gets home too.
                 if (needs != null && Plugin.CarryOverInjuries.Value) { needs.Health = Mathf.Clamp(health / rules.Health * 100f, 0, 100); NeedsStore.Save(); }
                 audio?.Play("happy");
-                Say($"{name} was treated (+{Mathf.RoundToInt(gives)}%): now at {Mathf.RoundToInt(health / rules.Health * 100)}%.");
+                Say(revived ? $"{name} is back on its feet, at {Mathf.RoundToInt(health / rules.Health * 100)}%." : $"{name} was treated (+{Mathf.RoundToInt(gives)}%): now at {Mathf.RoundToInt(health / rules.Health * 100)}%.");
             }
             if (lastOfIt)
             {

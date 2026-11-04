@@ -18,7 +18,7 @@ namespace K9Companion
     internal static class K9
     {
         private const string StateRoute = "/k9companion/k9/state", EventRoute = "/k9companion/k9/event",
-            SaveRoute = "/k9companion/k9/save", RaidRoute = "/k9companion/k9/raid-start", DiedRoute = "/k9companion/k9/dog-died";
+            SaveRoute = "/k9companion/k9/save", RaidRoute = "/k9companion/k9/raid-start", DiedRoute = "/k9companion/k9/dog-died", RevivedRoute = "/k9companion/k9/dog-revived";
 
         // Dr. Yang's quests and improvements (see the server mod's K9Ids).
         internal const string Yang = "6a5d0c0c4fb9a3c5e1d0d0a0";
@@ -151,6 +151,7 @@ namespace K9Companion
         {
             EnsureLoaded();
             if (!Owned) return "you have no dog yet";
+            if (Plugin.SoloOnly && DogNet.InGroup) return "dogs only come on solo raids, and this is a group raid";
             DogNeeds needs = NeedsStore.Current;
             if (Plugin.CarryOverInjuries.Value && needs != null && needs.Health < DeployFrom) return Plugin.DogName.Value + " is too badly hurt to deploy (" + Mathf.RoundToInt(needs.Health) + "%)";
             return null;
@@ -212,6 +213,7 @@ namespace K9Companion
         }
 
         internal static void DogDied() => Send(DiedRoute, "{}");
+        internal static void DogRevived() => Send(RevivedRoute, "{}");
 
         /// <summary>Saves cosmetics, bed, presets and jacket wear.</summary>
         internal static void Save()

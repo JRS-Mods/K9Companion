@@ -39,7 +39,9 @@ public sealed class BagRouter(JsonUtil json, BagKeeper keeper) : StaticRouter(js
     new RouteAction<BagStartRequest>("/k9companion/bag/raid-start",
         (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.RaidStart(sessionId, info?.BagId, info?.KitIds))),
     new RouteAction<BagEmptyRequest>("/k9companion/bag/dog-died",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.DogDied(sessionId)))
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.DogDied(sessionId))),
+    new RouteAction<BagEmptyRequest>("/k9companion/bag/dog-revived",
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.DogRevived(sessionId)))
 ]);
 
 [Injectable]
@@ -53,7 +55,9 @@ public sealed class K9Router(JsonUtil json, K9Keeper k9) : StaticRouter(json, [
     new RouteAction<K9Request>("/k9companion/k9/raid-start",
         (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(k9.RaidStart(sessionId, info))),
     new RouteAction<BagEmptyRequest>("/k9companion/k9/dog-died",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(k9.DogDied(sessionId)))
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(k9.DogDied(sessionId))),
+    new RouteAction<BagEmptyRequest>("/k9companion/k9/dog-revived",
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(k9.DogRevived(sessionId)))
 ]);
 
 [Injectable(TypePriority = OnLoadOrder.Preload + 2)]
