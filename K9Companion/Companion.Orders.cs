@@ -1004,6 +1004,8 @@ namespace K9Companion
             harmony.Patch(proceed, prefix: new HarmonyMethod(typeof(DogInteraction), nameof(UseMeds)));
             var quick = AccessTools.Method(typeof(Player), nameof(Player.TryProceed)) ?? throw new MissingMethodException(nameof(Player), nameof(Player.TryProceed));
             harmony.Patch(quick, prefix: new HarmonyMethod(typeof(DogInteraction), nameof(QuickUse)));
+            // Before that, a quick slot key asks whether the med would do YOU any good, and does nothing if not.
+            harmony.Patch(AccessTools.Method(typeof(Player), nameof(Player.SetQuickSlotItem)), prefix: new HarmonyMethod(typeof(DogInteraction), nameof(QuickSlot)));
             // The item menu: USE and HEAL ALL go by whether YOU are hurt; for the kit, by whether the dog is. Out of a raid,
             // dragging it onto your body goes through the menu's health controller instead of Player.Proceed.
             harmony.Patch(AccessTools.Method(typeof(ItemContextInteractionsSwitcher), nameof(ItemContextInteractionsSwitcher.IsInteractive)),
@@ -1016,6 +1018,12 @@ namespace K9Companion
 
         private static bool UseMeds(Meds meds) => !TreatInstead(meds);
         private static bool QuickUse(Item item) => !TreatInstead(item);
+        private static bool QuickSlot(Player __instance, EBoundItem quickSlot, Callback<IHandsController> callback)
+        {
+            if (!TreatInstead(__instance.InventoryController?.Inventory?.FastAccess?.GetBoundItem(quickSlot))) return true;
+            callback?.Invoke(default);
+            return false;
+        }
         private static bool AppliedAtHome(Item item, ref bool __result)
         {
             if (!TreatInstead(item)) return true;

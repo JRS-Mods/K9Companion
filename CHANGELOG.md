@@ -14,6 +14,7 @@ All of these are off by default. Server owners can set them for everyone in `SPT
 
 ### Fixed
 
+- **The K9 veterinary kit's quick slot key now always treats the dog.** The game only let the key through if the kit would help you, so if you weren't hurt it did nothing.
 - **No more small freeze every 2 seconds in the menus.** If you owned the dog, the mod searched the whole game for the hideout player until you first entered the hideout. It now only looks once the hideout has started loading.
 
 ## 1.1.0
