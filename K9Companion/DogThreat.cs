@@ -39,10 +39,29 @@ namespace K9Companion
         internal static void RaidOver() { Engagers.Clear(); Layers.Clear(); }
 
         // Same relationship the bot's group has with the dog's owner: scavs/raiders/rogues/bosses hostile to you are hostile to it.
+        // The group's own lists come first: an enemy is hostile; an ally, or a group that has you down as neutral, is not.
+        // Only for someone the group hasn't sorted yet does the side the bot was made for decide (IsPlayerEnemy, which never
+        // looks at those lists). Mods that make a bot friendly take you out of its enemies and put you in its neutrals
+        // (PitFireteam's friendly PMCs outside your unit, for one), and so does the game for those it leaves you be: such
+        // bots used to go for the dog all the same. Now they leave it alone as they leave you, and it leaves them alone.
         internal static bool HostileTo(BotOwner bot, Player owner)
         {
             BotsGroup group = bot.BotsGroup;
-            return owner != null && group != null && !group.IsAlly(owner) && (group.IsEnemy(owner) || group.IsPlayerEnemy(owner));
+            if (owner == null || group == null || group.IsAlly(owner)) return false;
+            if (group.IsEnemy(owner)) return true;
+            if (Neutral(group, owner)) return false;
+            return group.IsPlayerEnemy(owner);
+        }
+
+        // By profile: a mod may have put a different copy of the same person in the list.
+        private static bool Neutral(BotsGroup group, Player owner)
+        {
+            Dictionary<IPlayer, BotGroupEnemyInfo> neutrals = group.Neutrals;
+            if (neutrals == null || neutrals.Count == 0) return false;
+            if (neutrals.ContainsKey(owner)) return true;
+            string id = owner.ProfileId;
+            foreach (IPlayer p in neutrals.Keys) if (p != null && p.ProfileId == id) return true;
+            return false;
         }
 
         // Ids/values that no game strategy or decision uses.

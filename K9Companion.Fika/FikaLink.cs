@@ -101,7 +101,7 @@ namespace K9Companion.Fika
         private readonly HashSet<NetPeer> peers = new HashSet<NetPeer>();
         private readonly Dictionary<int, NetPeer> owners = new Dictionary<int, NetPeer>();
         private IFikaNetworkManager network;
-        private bool host, welcomed;
+        private bool host, welcomed, refused, toldSilent;
         private int helloTries;
         private float nextHello;
 
@@ -111,7 +111,7 @@ namespace K9Companion.Fika
             FikaEventDispatcher.SubscribeEvent<FikaNetworkManagerDestroyedEvent>(e => Safely(() => Destroyed(e)));
             FikaEventDispatcher.SubscribeEvent<PeerDisconnectedEvent>(e => Safely(() => Left(e)));
             // Whether or not you have a dog yourself: you want to see the others'.
-            FikaEventDispatcher.SubscribeEvent<GameWorldStartedEvent>(_ => Safely(() => { helloTries = 0; nextHello = 0; if (network != null && !host) SayHello(); }));
+            FikaEventDispatcher.SubscribeEvent<GameWorldStartedEvent>(_ => Safely(() => { helloTries = 0; nextHello = 0; toldSilent = false; if (network != null && !host) SayHello(); }));
         }
 
         // These run inside Fika's own events and its network loop: anything going wrong with the dog must stop here.
@@ -190,15 +190,25 @@ namespace K9Companion.Fika
 
         private void Reset()
         {
-            network = null; host = welcomed = false; helloTries = 0; nextHello = 0;
+            network = null; host = welcomed = refused = toldSilent = false; helloTries = 0; nextHello = 0;
             peers.Clear(); owners.Clear();
         }
 
         // Only once a raid's really on (the host may still be loading before that), and only a few times: a host without the
-        // mod just never answers.
+        // mod (or with a version before 1.1.2, if it isn't this one) never answers, and after the last try you're told so.
         private void SayHello()
         {
-            if (helloTries >= HelloTries || Time.time < nextHello) return;
+            if (Time.time < nextHello) return;
+            if (helloTries >= HelloTries)
+            {
+                if (!refused && !toldSilent)
+                {
+                    toldSilent = true;
+                    DogNet.NotShared($"Other players' dogs won't show this raid: the host didn't answer, so it hasn't got K9 Companion {Plugin.Version} " +
+                                     "(with K9Companion.Fika.dll). Everyone in the raid needs the same version, a headless host too.");
+                }
+                return;
+            }
             helloTries++; nextHello = Time.time + HelloEvery;
             var hello = new DogHelloPacket { Version = Plugin.Version };
             network.SendData(ref hello, DeliveryMethod.ReliableOrdered);
@@ -208,12 +218,27 @@ namespace K9Companion.Fika
         {
             if (host)
             {
-                if (packet.Version != Plugin.Version) { Plugin.Log.LogWarning($"A player has K9 Companion {packet.Version}, this host {Plugin.Version}: their dog isn't shared."); return; }
+                if (packet.Version != Plugin.Version)
+                {
+                    // Answered (not welcomed) with this version, so the player is told which; a version before 1.1.2 just
+                    // ignores it.
+                    var no = new DogHelloPacket { Version = Plugin.Version, Welcome = false };
+                    network.SendDataToPeer(ref no, DeliveryMethod.ReliableOrdered, from);
+                    DogNet.NotShared($"A player has K9 Companion {packet.Version} and you have {Plugin.Version}: you won't see each other's dogs. " +
+                                     "Everyone in the raid needs the same version.");
+                    return;
+                }
                 peers.Add(from);
                 var welcome = new DogHelloPacket { Version = Plugin.Version, Welcome = true };
                 network.SendDataToPeer(ref welcome, DeliveryMethod.ReliableOrdered, from);
             }
             else if (packet.Welcome) { welcomed = true; Plugin.Log.LogInfo("The host has K9 Companion too: dogs are shared."); }
+            else if (!welcomed && !refused)
+            {
+                refused = true;
+                DogNet.NotShared($"Other players' dogs won't show this raid: the host has K9 Companion {packet.Version} and you have {Plugin.Version}. " +
+                                 "Everyone in the raid needs the same version, a headless host too.");
+            }
         }
 
         private void Relay<T>(ref T packet, DeliveryMethod how, NetPeer except) where T : INetSerializable

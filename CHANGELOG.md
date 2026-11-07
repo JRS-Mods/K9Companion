@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.2
+
+Needs SPT 4.1.x. Install over 1.1.1 and restart the SPT server; your dog, kennel and quest progress carry over. With Fika, everyone needs this version, the host too (a headless host included).
+
+### Fixed
+
+- **The dog camera no longer makes the game hitch.** Each time the feed was drawn, the game rebuilt the grass around the dog, and then around you again for your own view. Whenever you and the dog were in different parts of the map, which is often and always on an Over There run, this happened several times a second. The feed now uses the grass already loaded around you. It also no longer searches the whole map every few seconds for scope lenses and lighting.
+- **Friendly PMCs from other mods leave the dog alone.** PitFireteam's friendly PMCs outside your unit (and any bot another mod or the game sets as neutral to you) went for the dog all the same. Now a bot that leaves you alone leaves the dog alone, and the dog leaves it alone too.
+
+### Changed
+
+- **Fika: you're told when dogs aren't shared.** If the host doesn't have K9 Companion, or has a different version, nobody sees anyone else's dog. A few seconds into the raid you now get a message on screen saying so, with both versions where the host has the mod.
+- The README lists the level each Dr. Yang quest needs: Trust Is Earned and Teeth and Steel open at level 12, The Last Handler at 20.
+
 ## 1.1.1
 
 Needs SPT 4.1.x. Install over 1.1.0 and restart the SPT server; your dog, kennel and quest progress carry over. With Fika, everyone needs this version.

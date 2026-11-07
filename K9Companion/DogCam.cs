@@ -33,7 +33,9 @@ namespace K9Companion
         private TextMeshProUGUI label, signal;
         private Transform mount;
         private float nextRender, shownSize = -1;
-        private int shownResolution = -1;
+        private int shownResolution = -1, labelMetres = -1;
+        private bool labelBlink;
+        private string labelName;
         private DogCamPlace shownPlace;
 
         // Low and Medium; High follows the feed's size on screen.
@@ -59,8 +61,15 @@ namespace K9Companion
                 signal.gameObject.SetActive(dead);
                 view.color = dead ? new Color(.12f, .12f, .12f) : Color.white;
                 float metres = Vector3.Distance(Dog.Owner.Transform.position, mount.position);
-                bool blink = Time.unscaledTime % 1.2f < .7f;
-                label.text = (blink && !dead ? "<color=#e03a2f>●</color> " : "   ") + "REC  K9 CAM  " + (Plugin.DogName.Value ?? "K9").ToUpperInvariant() + $"  {Mathf.RoundToInt(metres)} m";
+                bool blink = Time.unscaledTime % 1.2f < .7f && !dead;
+                // Only when it reads differently: setting a label's text rebuilds it, and this runs every frame.
+                int shownMetres = Mathf.RoundToInt(metres);
+                string name = Plugin.DogName.Value ?? "K9";
+                if (blink != labelBlink || shownMetres != labelMetres || name != labelName)
+                {
+                    labelBlink = blink; labelMetres = shownMetres; labelName = name;
+                    label.text = (blink ? "<color=#e03a2f>●</color> " : "   ") + "REC  K9 CAM  " + name.ToUpperInvariant() + $"  {shownMetres} m";
+                }
                 if (dead || Time.unscaledTime < nextRender) return;
                 nextRender = Time.unscaledTime + 1f / Mathf.Clamp(Plugin.DogCamFps.Value, 5, 30);
                 // Drawn once your own view has been (see Grass).
@@ -184,9 +193,30 @@ namespace K9Companion
         // pass marks where the blades are, the full one then fills just those pixels). The game puts that first pass on your
         // camera's own drawing steps, so the feed only ever got the grass's shadows: the black patches. The feed has its own
         // step for it, run before its picture is drawn, which also writes the grass depth the game's ambient light reads.
+        //
+        // Grass on a terrain is kept in cells, and only the cells around the camera it's culled for have their grass made
+        // (GPUInstancerDetailManager.UpdateSpatialPartitioningCells). Culled for the dog's camera, that was the cells round
+        // the dog: whenever it stood in different cells from you (often a few metres off, always on a run out), every feed
+        // frame threw your cells away and built the dog's, and your next frame did the reverse, each time in one go on the
+        // graphics card: the hitching. For the dog's pass the cells stay as your camera has them (the rebuild's own "busy"
+        // flag, set just for that call): what's within your grass distance is all the feed shows.
         private GPUInstancer.GPUInstancerCameraData grassView;
-        private readonly List<(GPUInstancer.GPUInstancerManager manager, GPUInstancer.GPUInstancerCameraData cameraData, bool occlusion)> borrowed =
-            new List<(GPUInstancer.GPUInstancerManager, GPUInstancer.GPUInstancerCameraData, bool)>();
+        private readonly List<(GPUInstancer.GPUInstancerManager manager, GPUInstancer.GPUInstancerCameraData cameraData, bool occlusion, Vector3 centre)> borrowed =
+            new List<(GPUInstancer.GPUInstancerManager, GPUInstancer.GPUInstancerCameraData, bool, Vector3)>();
+        private static HarmonyLib.AccessTools.FieldRef<GPUInstancer.GPUInstancerTerrainManager, bool> rebuildingFlag;
+        private static bool rebuildingLooked;
+        // Null if the game no longer has that flag: then a terrain's grass is left out of the feed rather than rebuilt for it.
+        private static HarmonyLib.AccessTools.FieldRef<GPUInstancer.GPUInstancerTerrainManager, bool> Rebuilding
+        {
+            get
+            {
+                if (rebuildingLooked) return rebuildingFlag;
+                rebuildingLooked = true;
+                try { rebuildingFlag = HarmonyLib.AccessTools.FieldRefAccess<GPUInstancer.GPUInstancerTerrainManager, bool>("replacingInstances"); }
+                catch (Exception e) { Plugin.Log.LogWarning("Dog camera: terrain grass is left out of the feed (it can't be kept from rebuilding): " + e.Message); }
+                return rebuildingFlag;
+            }
+        }
         private bool grassFailed, grassLogged;
         private readonly List<GPUInstancer.GPUInstancerPrototype> fades = new List<GPUInstancer.GPUInstancerPrototype>();
         private UnityEngine.Rendering.CommandBuffer grassDepth;
@@ -221,7 +251,10 @@ namespace K9Companion
                     if (manager == null || manager.IsOptic || !manager.isActiveAndEnabled || manager.runtimeDataList == null) continue;
                     Camera its = manager.Camera;
                     if (its == null || !its.isActiveAndEnabled) continue;
-                    borrowed.Add((manager, manager.cameraData, manager.isOcclusionCulling));
+                    var terrain = manager as GPUInstancer.GPUInstancerTerrainManager;
+                    var hold = Rebuilding;
+                    if (terrain != null && hold == null) continue;
+                    borrowed.Add((manager, manager.cameraData, manager.isOcclusionCulling, manager.instancingBounds.center));
                     // No occlusion test: that needs a depth pyramid the dog's camera hasn't got.
                     manager.cameraData = grassView; manager.isOcclusionCulling = false;
                     // Plants coming into view fade in over several frames; your camera resets that between the feed's frames,
@@ -229,8 +262,15 @@ namespace K9Companion
                     fades.Clear();
                     foreach (var rd in manager.runtimeDataList)
                         if (rd?.prototype != null && rd.prototype.isLODCrossFadeAnimate) { fades.Add(rd.prototype); rd.prototype.isLODCrossFadeAnimate = false; }
+                    // Your camera's grass cells kept (see above); a rebuild already under way stays as it was.
+                    bool rebuilding = terrain != null && hold(terrain);
+                    if (terrain != null) hold(terrain) = true;
                     try { manager.UpdateBuffers(); }
-                    finally { foreach (var prototype in fades) prototype.isLODCrossFadeAnimate = true; }
+                    finally
+                    {
+                        if (terrain != null) hold(terrain) = rebuilding;
+                        foreach (var prototype in fades) prototype.isLODCrossFadeAnimate = true;
+                    }
                     GPUInstancer.GPUInstancerUtility.DrawPrePass(grassDepth, manager.runtimeDataList, manager.instancingBounds, grassView, false);
                     GPUInstancer.GPUInstancerUtility.GPUIDrawMeshInstancedIndirect(manager.runtimeDataList, manager.instancingBounds, grassView);
                 }
@@ -251,8 +291,8 @@ namespace K9Companion
         // your view's ambient light reads put back to yours.
         private void GrassBack()
         {
-            foreach (var (manager, cameraData, occlusion) in borrowed)
-                if (manager != null) { manager.cameraData = cameraData; manager.isOcclusionCulling = occlusion; }
+            foreach (var (manager, cameraData, occlusion, centre) in borrowed)
+                if (manager != null) { manager.cameraData = cameraData; manager.isOcclusionCulling = occlusion; manager.instancingBounds.center = centre; }
             borrowed.Clear();
             grassDepth?.Clear();
             if (grassDepthSet) { grassDepthSet = false; Shader.SetGlobalTexture(GrassDepthId, grassDepthBefore); grassDepthBefore = null; }
@@ -484,8 +524,9 @@ namespace K9Companion
         }
 
         // Your scope's lens shows what the scope camera sees, for your eye only; from the dog's camera it's a big black
-        // disc over you. Hidden for the dog's render.
-        private OpticSight[] optics = Array.Empty<OpticSight>();
+        // disc over you. Hidden for the dog's render. Your sights are looked for on you, now and then, and the one you're
+        // looking through is the game's own; never across the whole map, which stalled the game every time.
+        private readonly List<OpticSight> optics = new List<OpticSight>();
         private float nextOpticLook;
         private readonly List<Renderer> lenses = new List<Renderer>();
         private void HideLenses(bool hide)
@@ -496,36 +537,66 @@ namespace K9Companion
                 lenses.Clear();
                 return;
             }
-            if (Time.unscaledTime >= nextOpticLook) { nextOpticLook = Time.unscaledTime + 2; optics = FindObjectsOfType<OpticSight>(); }
-            foreach (OpticSight optic in optics)
+            if (Time.unscaledTime >= nextOpticLook)
             {
-                Renderer lens = optic != null ? optic.LensRenderer : null;
-                if (lens == null || !lens.enabled) continue;
-                lens.enabled = false;
-                lenses.Add(lens);
+                nextOpticLook = Time.unscaledTime + 2;
+                optics.Clear();
+                if (Dog.Owner != null) Dog.Owner.gameObject.GetComponentsInChildren(false, optics);
             }
+            Hide(CameraManager.Instance?.OpticCameraManager?.CurrentOpticSight);
+            foreach (OpticSight optic in optics) Hide(optic);
+        }
+
+        private void Hide(OpticSight optic)
+        {
+            Renderer lens = optic != null ? optic.LensRenderer : null;
+            if (lens == null || !lens.enabled) return;
+            lens.enabled = false;
+            lenses.Add(lens);
         }
 
         // The game lights its scenes partly through its own scripts (the indoor/outdoor ambient light, its light manager),
         // which only serve its main and scope cameras; without them the feed was black silhouettes. Each render they're
         // asked to serve this camera too, as they do the scope's: each builds its own drawing for it, at its size.
-        private OnRenderObjectConnector[] lighting;
-        private float nextLightingLook;
+        // They're found once, as the raid starts (DogCam comes with the dog); after that the game announces each one that
+        // comes or goes, as it does to its own list (OnRenderObjectManager). Searching the map for them every 10 s while
+        // the feed showed was a stall each time.
+        private readonly List<OnRenderObjectConnector> lighting = new List<OnRenderObjectConnector>();
+        private bool lightingFound;
+        private void Start() { try { if (Dog != null && Dog.CameraMount() != null) FindLighting(); } catch (Exception) { } }
+        private void FindLighting()
+        {
+            if (lightingFound) return;
+            lightingFound = true;
+            try
+            {
+                OnRenderObjectConnector.OnRenderObjectConnectorAdd += LightingAdded;
+                OnRenderObjectConnector.OnRenderObjectConnectorRemove += LightingRemoved;
+                foreach (OnRenderObjectConnector part in FindObjectsOfType<OnRenderObjectConnector>()) LightingAdded(part);
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("Dog camera: the game's lighting scripts couldn't be found for the feed: " + e.Message); }
+        }
+
         private void Light()
         {
-            if (lighting == null || Time.unscaledTime >= nextLightingLook)
+            FindLighting();
+            for (int i = 0; i < lighting.Count; i++)
             {
-                nextLightingLook = Time.unscaledTime + 10;
-                lighting = FindObjectsOfType<OnRenderObjectConnector>();
-            }
-            foreach (OnRenderObjectConnector part in lighting)
+                OnRenderObjectConnector part = lighting[i];
                 if (part != null && part.isActiveAndEnabled)
                     try { part.ManualOnRenderObject(cam); } catch (Exception) { }
+            }
         }
+
+        private void LightingAdded(OnRenderObjectConnector part) { if (part != null && !lighting.Contains(part)) lighting.Add(part); }
+        private void LightingRemoved(OnRenderObjectConnector part) => lighting.Remove(part);
 
         // In first person your own body isn't drawn whole (your head only casts a shadow); for the dog's camera it is.
         private readonly List<(Renderer renderer, bool enabled, UnityEngine.Rendering.ShadowCastingMode shadows)> body =
             new List<(Renderer, bool, UnityEngine.Rendering.ShadowCastingMode)>();
+        // Your renderers, gathered again every 2 s (gear changes) into the same list rather than a new array each render.
+        private readonly List<Renderer> yours = new List<Renderer>();
+        private float nextBodyLook;
         private void ShowBody(bool show)
         {
             if (!show)
@@ -537,8 +608,10 @@ namespace K9Companion
             Player you = Dog.Owner;
             if (you == null) return;
             // The whole player, not just its body: the gear you wear (a face cover, a helmet) hangs off the skeleton.
-            foreach (Renderer r in you.gameObject.GetComponentsInChildren<Renderer>(true))
+            if (Time.unscaledTime >= nextBodyLook) { nextBodyLook = Time.unscaledTime + 2; you.gameObject.GetComponentsInChildren(true, yours); }
+            foreach (Renderer r in yours)
             {
+                if (r == null) continue;
                 // Only what the game draws as a shadow alone (your head and head gear in first person); anything it has
                 // switched off (lower-detail copies, gear not worn) stays off.
                 if (!r.enabled || !r.gameObject.activeInHierarchy || r.shadowCastingMode != UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly) continue;
@@ -638,6 +711,11 @@ namespace K9Companion
 
         private void OnDestroy()
         {
+            if (lightingFound)
+            {
+                OnRenderObjectConnector.OnRenderObjectConnectorAdd -= LightingAdded;
+                OnRenderObjectConnector.OnRenderObjectConnectorRemove -= LightingRemoved;
+            }
             if (overlay != null) Destroy(overlay);
             if (picture != null) { picture.Release(); Destroy(picture); }
             if (grassDepthTexture != null) { grassDepthTexture.Release(); Destroy(grassDepthTexture); }

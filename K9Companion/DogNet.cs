@@ -217,7 +217,20 @@ namespace K9Companion
         {
             foreach (DogReplica copy in replicas.Values) if (copy != null) UnityEngine.Object.Destroy(copy.gameObject);
             replicas.Clear(); standings.Clear();
+            toldNotShared = false;
             DogThreat.RaidOver();
+        }
+
+        // Why the other players' dogs aren't showing (a host without the mod, another version): on screen once a raid,
+        // where the player can see it, and in the log. Not on a headless host, which has no one to tell.
+        private static bool toldNotShared;
+        internal static void NotShared(string why)
+        {
+            Plugin.Log.LogWarning(why);
+            if (toldNotShared || Headless) return;
+            toldNotShared = true;
+            try { EFT.Communications.NotificationManager.DisplayWarningNotification(why); }
+            catch (Exception e) { Plugin.Log.LogWarning("Couldn't show that on screen: " + e.Message); }
         }
 
         private static GameWorld World => Comfort.Common.Singleton<GameWorld>.Instantiated ? Comfort.Common.Singleton<GameWorld>.Instance : null;
