@@ -22,6 +22,9 @@ public sealed class BagRecord
     [JsonPropertyName("bagId")] public string? BagId { get; set; }
     [JsonPropertyName("inRaid")] public bool InRaid { get; set; }
     [JsonPropertyName("dogDied")] public bool DogDied { get; set; }
+    // The dog was killed and you took its gear off it (jacket into your own gear, head gear and camera with it): if you
+    // get out alive it comes home with you and goes back on the dog.
+    [JsonPropertyName("gearTaken")] public bool GearTaken { get; set; }
     [JsonPropertyName("recordedAt")] public long RecordedAt { get; set; }
     // Once a profile has had a jacket the dog never gets another free one; lost jackets are bought from Dr. Yang.
     [JsonPropertyName("firstJacketGiven")] public bool FirstJacketGiven { get; set; }
@@ -38,9 +41,11 @@ public sealed class BagRecord
 ///  - The client says when the jacket goes into a raid. It then rides in the profile's raid quest-items container,
 ///    which the game copies back at extract and wipes on death, so the contents are saved by the game itself.
 ///  - After the raid the jacket goes back on the dog. Leftovers from the pre-raid copy are removed so nothing is
-///    duplicated. If you died or the dog died, the jacket (and whatever was still in it) is gone.
+///    duplicated. If you died or the dog died, the jacket (and whatever was still in it) is gone, unless you took a
+///    killed dog's gear off it (the jacket into your own gear) and got out: then it all goes back on the dog.
 ///  - Head gear and the camera never leave the dog's slots (the client draws them from what it saw at raid start);
-///    the server only notes which ones went, and removes them after the raid if you died or the dog died.
+///    the server only notes which ones went, and removes them after the raid if you died or the dog died (and you
+///    didn't take its gear).
 ///  - Anything insured among the lost gear (the jacket, its plates and camera, what's in it, the head gear) goes through
 ///    the game's own insurance, as your own lost gear does: the insurer finds it, or doesn't, and mails it back. The game
 ///    itself only looks at your own gear, so the dog's is handed to the same process here.
@@ -133,6 +138,18 @@ public sealed class BagKeeper(ISptLogger<BagKeeper> logger, ProfileHelper profil
         if (pmc == null) return Refused;
         BagRecord record = Load(pmc);
         if (record.InRaid || record.KitIds is { Count: > 0 }) { record.DogDied = true; Save(pmc, record); }
+        return Ok;
+    }
+
+    // You took the killed dog's gear: kept if you get out alive.
+    public string GearTaken(MongoId sessionId)
+    {
+        PmcData? pmc = profiles.GetPmcProfile(sessionId);
+        if (pmc == null) return Refused;
+        BagRecord record = Load(pmc);
+        if (!record.DogDied) return Refused;
+        record.GearTaken = true; Save(pmc, record);
+        logger.Info("[K9Companion] You took the dead dog's gear; it's yours if you get out.");
         return Ok;
     }
 
@@ -282,7 +299,7 @@ public sealed class BagKeeper(ISptLogger<BagKeeper> logger, ProfileHelper profil
             isDead, isTransfer, id => BagLedger.PutBack(pmc.Inventory.Items!, KitFor(pmc, record), id));
         // Moving to the next map: the jacket and head gear stay with the dog (and at risk).
         if (outcome == BagLedger.Outcome.Transit || (isTransfer && record.KitIds is { Count: > 0 })) return;
-        if (record.KitIds is { Count: > 0 } && (isDead || record.DogDied))
+        if (record.KitIds is { Count: > 0 } && (isDead || (record.DogDied && !record.GearTaken)))
         {
             foreach (string id in record.KitIds) BagLedger.RemoveWithChildren(pmc.Inventory.Items!, new MongoId(id));
             Insure(sessionId, pmc, record.KitIds.Select(id => new MongoId(id)), location, request);
@@ -496,7 +513,8 @@ public static class BagLedger
         Item? bag = serverItems.FirstOrDefault(i => i.Id == bagId);
         List<Item> postBag = postItems?.GetItemWithChildren(bagId) ?? new List<Item>();
         bool cameBack = postBag.Count > 0 && postBag[0].ParentId == postRaidContainerId;
-        bool keep = !isDead && !record.DogDied && bag != null && cameBack;
+        // Back in the raid container with a living dog, or (a killed dog's, taken off it) in your own gear.
+        bool keep = !isDead && bag != null && postBag.Count > 0 && (cameBack ? !record.DogDied : record.DogDied && record.GearTaken);
         if (bag == null) return isDead ? Outcome.LostWithPlayer : record.DogDied ? Outcome.LostWithDog : Outcome.Lost;
         if (keep)
         {

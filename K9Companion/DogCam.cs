@@ -47,7 +47,7 @@ namespace K9Companion
             try
             {
                 if (Dog == null) return;
-                if (Plugin.DogCamKey.Value.IsDown())
+                if (GameBinds.Pressed(Plugin.DogCamKey, Dog.Say, Dog.Owner != null && Dog.Owner.Side == EPlayerSide.Savage))
                 {
                     Plugin.DogCamShow.Value = !Plugin.DogCamShow.Value;
                     Dog.Say("Dog camera " + (Plugin.DogCamShow.Value ? "on." : "off."));
@@ -56,6 +56,7 @@ namespace K9Companion
                 bool show = Plugin.DogCamShow.Value && mount != null && Dog.Owner != null && Dog.Owner.HealthController != null && Dog.Owner.HealthController.IsAlive;
                 if (!show) { if (overlay != null && overlay.activeSelf) overlay.SetActive(false); return; }
                 Build();
+                Place();
                 if (!overlay.activeSelf) overlay.SetActive(true);
                 bool dead = Dog.IsDead;
                 signal.gameObject.SetActive(dead);
@@ -666,23 +667,37 @@ namespace K9Companion
                 signal.text = "NO SIGNAL";
             }
             view.texture = picture;
-            // 16:9, a share of the screen's height (Dog camera > Size), where Dog camera > Position says: by default
-            // top left, just right of the green health figure (about an eighth of the screen's height wide).
+            // 16:9, a share of the screen's height (Dog camera > Size), where Dog camera > Position says (see Place).
             float h = Screen.height * Mathf.Clamp(size, .12f, .45f), w = h * 16 / 9;
             var frameRect = (RectTransform)view.transform.parent;
-            Vector2 corner; Vector2 at;
-            switch (Plugin.DogCamPosition.Value)
-            {
-                case DogCamPlace.TopLeft: corner = new Vector2(0, 1); at = new Vector2(16, -16); break;
-                case DogCamPlace.TopRight: corner = new Vector2(1, 1); at = new Vector2(-16, -16); break;
-                default: corner = new Vector2(0, 1); at = new Vector2(Screen.height * .13f, -16); break;
-            }
+            Vector2 corner = Plugin.DogCamPosition.Value == DogCamPlace.TopRight ? new Vector2(1, 1) : new Vector2(0, 1);
             frameRect.anchorMin = frameRect.anchorMax = frameRect.pivot = corner;
-            frameRect.anchoredPosition = at; frameRect.sizeDelta = new Vector2(w + 6, h + 6);
+            frameRect.sizeDelta = new Vector2(w + 6, h + 6);
+            placedAt = new Vector2(float.NaN, float.NaN);
+            Place();
             Fill((RectTransform)view.transform, 3);
             Fill((RectTransform)label.transform, 8);
             Fill((RectTransform)signal.transform, 0);
             label.fontSize = Mathf.Max(11, h * .075f);
+        }
+
+        // By default top left under your health figure (beside it are your status effects); or in a corner. Checked every frame, moved only when it changes.
+        private Vector2 placedAt;
+        private void Place()
+        {
+            Vector2 at;
+            switch (Plugin.DogCamPosition.Value)
+            {
+                case DogCamPlace.TopLeft: at = new Vector2(16, -16); break;
+                case DogCamPlace.TopRight: at = new Vector2(-16, -16); break;
+                default:
+                    Vector2 under = HudLayout.UnderHealth;
+                    at = new Vector2(under.x, -under.y);
+                    break;
+            }
+            if (at == placedAt) return;
+            placedAt = at;
+            ((RectTransform)view.transform.parent).anchoredPosition = at;
         }
 
         private static Transform Box(Transform parent, string name, Color colour)

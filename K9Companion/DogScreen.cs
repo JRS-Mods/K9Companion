@@ -37,7 +37,7 @@ namespace K9Companion
         private const float SlotHeader = 20, SlotBox = 127, GridCell = 63.2f, JacketCells = 6;
         private const float JacketTop = 4, DogTop = 70, DogHeight = 396;
         // The rows down the left-hand side, from just under the dog.
-        private const float StatTop = -482, CareTop = -576, BehaviourTop = -640, BehaviourHeight = 140;
+        private const float StatTop = -482, CareTop = -576, BehaviourTop = -640, BehaviourHeight = 166;
         // Where the largest jacket's grid ends, in layout units.
         private float JacketBottom => (JacketTop * s + SlotHeader + JacketCells * GridCell) / s;
         private const float DogZoom = 1.42f;   // metres the picture of the dog shows, top to bottom
@@ -193,11 +193,21 @@ namespace K9Companion
                 ("DIRECT", () => Plugin.Approaching == DogApproach.Direct, () => Plugin.ApproachMode.Value = DogApproach.Direct),
                 ("AUTO", () => Plugin.Approaching == DogApproach.Auto, () => Plugin.ApproachMode.Value = DogApproach.Auto)
             }, () => Plugin.Combat && ServerRules.Approach == null);
-            behaviourLine = Text("", 11.5f, FontStyles.Italic, Soft, new Vector2(LeftX + 10, top - 103), new Vector2(LeftW - 20, 18));
-            approachLine = Text("", 11.5f, FontStyles.Italic, Soft, new Vector2(LeftX + 10, top - 120), new Vector2(LeftW - 20, 18));
+            // Fika groups: General > Solo raids only, unless the server fixes it. (It never comes on Scav raids.)
+            Row("GROUP RAIDS", top - 104, new (string, Func<bool>, Action)[]
+            {
+                ("COMES WITH YOU", () => !Plugin.SoloOnly, () => Plugin.SoloRaidsOnly.Value = false),
+                ("STAYS HOME", () => Plugin.SoloOnly, () => Plugin.SoloRaidsOnly.Value = true)
+            }, () => ServerRules.SoloOnly == null);
+            behaviourLine = Text("", 11.5f, FontStyles.Italic, Soft, new Vector2(LeftX + 10, top - 129), new Vector2(LeftW - 20, 18));
+            approachLine = Text("", 11.5f, FontStyles.Italic, Soft, new Vector2(LeftX + 10, top - 146), new Vector2(LeftW - 20, 18));
         }
 
         private void Row(string title, float y, (string Text, Func<bool> Chosen, Action Click)[] options, Func<bool> open)
+            => Row(title, y, options.Select(o => (o.Text, o.Chosen, o.Click, open)).ToArray());
+
+        // Each option with its own say on whether it can be changed (set by the server, or not without combat mode).
+        private void Row(string title, float y, (string Text, Func<bool> Chosen, Action Click, Func<bool> Open)[] options)
         {
             const float labelWidth = 118, height = 23, gap = 4;
             var label = Text(title, 11.5f, FontStyles.Bold, Soft, new Vector2(LeftX + 10, y - 4), new Vector2(labelWidth, 18));
@@ -205,7 +215,7 @@ namespace K9Companion
             float width = (LeftW - labelWidth - 20 - gap * (options.Length - 1)) / options.Length;
             for (int i = 0; i < options.Length; i++)
             {
-                var (text, chosen, click) = options[i];
+                var (text, chosen, click, open) = options[i];
                 var (button, caption) = ButtonWithLabel(text, new Vector2(LeftX + 10 + labelWidth + i * (width + gap), y), () => { if (open()) click(); }, new Vector2(width, height));
                 caption.fontSize = 11.5f * s;
                 choices.Add(new Choice { Back = button.targetGraphic as Image, Label = caption, Button = button, Chosen = chosen, Open = open });
@@ -226,7 +236,7 @@ namespace K9Companion
                 : Plugin.Aggressiveness == Aggression.Passive ? "Warns you about enemies, and attacks when you order Over There."
                 : Plugin.Aggressiveness == Aggression.Defensive ? $"Also goes for whoever shoots at you or it, up to {Plugin.DefendReach:0} m away, unasked."
                 : "Goes for every enemy it detects, and whoever shoots at you.";
-            bool server = ServerRules.CombatMode != null || ServerRules.Aggression != null || ServerRules.Approach != null;
+            bool server = ServerRules.CombatMode != null || ServerRules.Aggression != null || ServerRules.Approach != null || ServerRules.SoloOnly != null;
             behaviourLine.text = does + (server ? "  (Some of this is set by the server.)" : "");
             approachLine.text = !Plugin.Combat ? ""
                 : Plugin.Approaching == DogApproach.Auto ? $"Straight at anything within {Plugin.AutoRush:0} m, and works its way in to anything further off."
@@ -282,7 +292,7 @@ namespace K9Companion
             // The camera clips onto the jacket now; the dog's own Camera slot only shows while an old camera is still in it
             // (the server moves it onto the jacket or into the stash at game start), where the collar would go.
             else if (camera != null && camera.ContainedItem != null) Show(camera, new Vector2(LeftX + 8 / s, collarAt), "camera_action");
-            Text("Drag a K9 jacket, goggles or collar into its slot; plates and an action camera onto the jacket. Jacket and goggles go into PMC raids with the dog and are lost if it or you die; the collar is never lost.",
+            Text("Drag a K9 jacket, goggles or collar into its slot; plates and an action camera onto the jacket. Jacket and goggles go into PMC raids with the dog and are lost if you die, or if it's killed and you don't take its gear off it; the collar is never lost.",
                  12, FontStyles.Italic, Soft, new Vector2(LeftX + 2, BehaviourTop - BehaviourHeight - 34), new Vector2(RightX + RightW - LeftX, 20));
         }
 
@@ -579,7 +589,8 @@ namespace K9Companion
                 () => NeedsDog() ?? (KennelLevel < 1 ? "Makeshift Kennel" : null), FillBowls);
 
             // The kennel.
-            const float presetTop = BehaviourTop - BehaviourHeight + 88, gap = 8;
+            // Where it was before the Behaviour panel grew a row (1.2.0): the presets end level with the panel's old bottom.
+            const float presetTop = BehaviourTop - 140 + 88, gap = 8;
             float top = -(JacketBottom + 8), inner = RightW - 20, cell = inner / 3, button = (inner - 3 * gap) / 4;
             float kennelHeight = top - presetTop - 12;
             Panel("Kennel", new Vector2(RightX, top), new Vector2(RightW, kennelHeight));

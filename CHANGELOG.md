@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.2.0
+
+Needs SPT 4.1.x. Install over 1.1.2 and restart the SPT server; your dog, kennel and quest progress carry over. With Fika, everyone needs this version, the host too (a headless host included).
+
+### Added
+
+- **A health bar over the dog's head.** It shows through walls, goes amber below 70% and red below 25%, and shows DOWN (with the time left to revive it) or KILLED. It shows in combat mode; Display > Dog health bar turns it off.
+- **Take a killed dog's gear.** Look at its body and pick *Take its gear*. Its jacket, with everything in it, goes into your own gear if there's room, and its goggles and camera come with it. Get out alive and it's all back on the dog. Die and it's lost with the rest of your gear. Before, everything the dog wore was lost when it was killed.
+- **Bring to me** (Shift+F8, or in the Y menu's DOG group): puts the dog right in front of you, following again. For when it's stuck indoors.
+- **GROUP RAIDS in the DOG tab** (under Behaviour): COMES WITH YOU or STAYS HOME, the same as General > Solo raids only, which is no longer hidden under Advanced.
+
+### Changed
+
+- **No dog on Scav raids.** It used to come along without its gear, and wounds or a death there carried over to your PMC's dog.
+- **The dog goes for the nearest threat.** An enemy in front of you now comes before one shooting at you from far off. A much nearer enemy pulls it off one it picked itself (never off one you ordered). If the nearest enemy has no path to it, it tries the next one instead of giving up.
+- **The dog camera sits under your health figure.** Beside the figure, where it was, it covered your status effects. The setting is now Dog camera > Position > UnderHealth, and an old NextToHealth setting reads as that.
+- **Dog messages show along the bottom of the screen.** Bottom left, where they were, covered your stance and stamina.
+- **F-key binds don't double up.** An F-key you've bound in the game's Y-menu binds belongs to that bind: the dog's own key on the same F-key stands aside instead of both firing, and says so the first time.
+
+### Fixed
+
+- **The dog's loadout on the loading screen showed "None"** for everything after a Scav raid.
+- **Clicking the dog's name on the loading screen** now shows the dog in the big picture (the copied player line's name kept the click).
+
 ## 1.1.2
 
 Needs SPT 4.1.x. Install over 1.1.1 and restart the SPT server; your dog, kennel and quest progress carry over. With Fika, everyone needs this version, the host too (a headless host included).

@@ -559,11 +559,16 @@ namespace K9Companion
     /// The dog's jacket on raid day. At home the dog wears it in the DOG tab (see DogGear); when a PMC raid starts it
     /// goes with the dog: the client tells the server first, then moves the jacket into the profile's raid quest-items
     /// container, which the game already saves when you extract and wipes when you die. After the raid the server puts it
-    /// back on the dog. If the dog dies, whatever is still in its jacket at the end of the raid is lost.
+    /// back on the dog. If the dog dies, whatever is still in its jacket at the end of the raid is lost, unless you take its
+    /// gear off it (the jacket into your own gear): then it goes back on the dog if you get out.
     /// </summary>
     internal static class DogBag
     {
-        private const string StartRoute = "/k9companion/bag/raid-start", DogDiedRoute = "/k9companion/bag/dog-died", DogRevivedRoute = "/k9companion/bag/dog-revived";
+        private const string StartRoute = "/k9companion/bag/raid-start", DogDiedRoute = "/k9companion/bag/dog-died", DogRevivedRoute = "/k9companion/bag/dog-revived",
+            GearTakenRoute = "/k9companion/bag/gear-taken";
+
+        /// <summary>This raid, you've taken the killed dog's gear (Companion.TakeGear).</summary>
+        internal static bool GearTaken { get; private set; }
 
         internal static void Patch(Harmony harmony)
         {
@@ -583,9 +588,10 @@ namespace K9Companion
                 RaidSettings raid = __instance.CurrentRaidSettings;
                 if (profile?.Inventory == null || raid == null) return;
                 bool pmcRaid = raid.Side == ESideType.Pmc;
+                GearTaken = false;
                 // Whether the dog comes along at all: you need a dog, and it must be fit enough (K9.NotDeployable).
                 K9.Refresh();
-                string stays = K9.NotDeployable();
+                string stays = K9.NotDeployable(!pmcRaid);
                 bool deployed = Plugin.Active.Value && stays == null;
                 Deployed = deployed;
                 if (Plugin.Active.Value && stays != null && K9.Owned) Plugin.Log.LogInfo("The dog stays home this raid: " + stays + ".");
@@ -663,6 +669,22 @@ namespace K9Companion
         {
             try { RequestHandler.PostJson(DogDiedRoute, "{}"); }
             catch (Exception e) { Plugin.Log.LogWarning("Couldn't tell the server the dog died: " + e.Message); }
+        }
+
+        // You took the killed dog's gear: the server keeps it if you get out alive. In the background (the dog's death was
+        // reported, and waited for, when it died).
+        internal static void TookGear()
+        {
+            GearTaken = true;
+            try
+            {
+                RequestHandler.PostJsonAsync(GearTakenRoute, "{}").ContinueWith(t =>
+                {
+                    if (t.IsFaulted || t.Result == null || !t.Result.Contains("\"ok\":true"))
+                        Plugin.Log.LogWarning("The server mod didn't record that you took the dog's gear (an older server mod?): " + (t.Exception?.GetBaseException().Message ?? t.Result));
+                });
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("Couldn't tell the server you took the dog's gear: " + e.Message); }
         }
 
         // A downed dog was reported as dead (so a raid ending, or a crash, counts as just that), and has been brought back.

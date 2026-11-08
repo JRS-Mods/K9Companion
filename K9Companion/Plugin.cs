@@ -19,7 +19,7 @@ namespace K9Companion
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id = "jrs.k9companion";
-        public const string Version = "1.1.2";
+        public const string Version = "1.2.0";
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> Active, CombatMode, SurvivalNeeds, AutoFeedInHideout, CarryOverInjuries;
         internal static ConfigEntry<DogApproach> ApproachMode;
@@ -42,7 +42,8 @@ namespace K9Companion
         internal static ConfigEntry<float> Volume, BreathingVolume;
         internal static ConfigEntry<KeyboardShortcut> Stay, Lie, Rename, Pet, Feed, Water, DogCamKey;
         internal static ConfigEntry<bool> DogCamShow;
-        internal static ConfigEntry<bool> SoloRaidsOnly, DownedInsteadOfKilled;
+        internal static ConfigEntry<bool> SoloRaidsOnly, DownedInsteadOfKilled, HealthBar;
+        internal static ConfigEntry<KeyboardShortcut> Bring;
         internal static ConfigEntry<float> BleedOutTime, CarryLimit;
         internal static ConfigEntry<float> DogCamSize;
         internal static ConfigEntry<int> DogCamFps;
@@ -54,94 +55,103 @@ namespace K9Companion
         private ConfigEntry<KeyboardShortcut> Key(string name, KeyCode key, string description, params KeyCode[] modifiers)
             => Config.Bind("Controls", name, new KeyboardShortcut(key, modifiers), description);
 
+        // Fine-tuning that the F12 window keeps out of sight until "Advanced settings" is ticked.
+        private static ConfigDescription Adv(string text, AcceptableValueBase range = null)
+            => new ConfigDescription(text, range, new ConfigurationManagerAttributes { IsAdvanced = true });
+
         private void Awake()
         {
             Log = Logger; instance = this;
-            Active = Config.Bind("General", "Enabled", true, "Spawn your companion in raids.");
+            Active = Config.Bind("General", "Enabled", true, Adv("Spawn your companion in raids."));
             SoloRaidsOnly = Config.Bind("General", "Solo raids only", false,
-                "The dog only comes on raids where you're the only player, and stays home in a Fika group. This is your own dog only: " +
-                "to keep every dog out of group raids, the server's owner sets soloOnly in the server mod's config.jsonc.");
+                "On: the dog only comes on raids where you're the only player, and stays home in a Fika group (also in the DOG tab, " +
+                "under Behaviour: GROUP RAIDS). This is your own dog only: to keep every dog out of group raids, the server's owner sets soloOnly " +
+                "in the server mod's config.jsonc.");
             Distance = Config.Bind("Movement", "FollowDistance", 2f,
-                new ConfigDescription("Where the dog stops beside you, in metres.", new AcceptableValueRange<float>(1.5f, 8f)));
+                Adv("Where the dog stops beside you, in metres.", new AcceptableValueRange<float>(1.5f, 8f)));
             RunDistance = Config.Bind("Movement", "RunDistance", 6f,
-                new ConfigDescription("Further than this from you the dog runs instead of walking.", new AcceptableValueRange<float>(3f, 20f)));
+                Adv("Further than this from you the dog runs instead of walking.", new AcceptableValueRange<float>(3f, 20f)));
             SprintDistance = Config.Bind("Movement", "SprintDistance", 15f,
-                new ConfigDescription("Further than this from you the dog sprints to catch up.", new AcceptableValueRange<float>(8f, 40f)));
+                Adv("Further than this from you the dog sprints to catch up.", new AcceptableValueRange<float>(8f, 40f)));
             WalkSpeed = Config.Bind("Movement", "WalkSpeedMultiplier", 1f,
-                new ConfigDescription("Scales walking and sneaking speed; animation playback follows.", new AcceptableValueRange<float>(.5f, 2f)));
+                Adv("Scales walking and sneaking speed; animation playback follows.", new AcceptableValueRange<float>(.5f, 2f)));
             RunSpeed = Config.Bind("Movement", "RunSpeedMultiplier", 1f,
-                new ConfigDescription("Scales trotting and running speed; animation playback follows.", new AcceptableValueRange<float>(.5f, 2f)));
+                Adv("Scales trotting and running speed; animation playback follows.", new AcceptableValueRange<float>(.5f, 2f)));
             SprintSpeed = Config.Bind("Movement", "SprintSpeedMultiplier", 1f,
-                new ConfigDescription("Scales sprinting speed; animation playback follows.", new AcceptableValueRange<float>(.5f, 2f)));
+                Adv("Scales sprinting speed; animation playback follows.", new AcceptableValueRange<float>(.5f, 2f)));
             CombatMode = Config.Bind("Combat", "CombatMode", false,
-                "Off: the dog only follows and obeys commands. AI ignore it, it cannot attack, and it cannot be hurt or killed. " +
-                "On: the dog can attack, hostile AI can shoot it, and it can always be killed.");
+                Adv("Off: the dog only follows and obeys commands. AI ignore it, it cannot attack, and it cannot be hurt or killed. " +
+                "On: the dog can attack, hostile AI can shoot it, and it can always be killed."));
             // As a working patrol dog: it alerts its handler and goes in on command (or, trained for handler protection,
             // when you're attacked); it never picks fights on its own unless set to Aggressive.
             DogAggression = Config.Bind("Combat", "Dog aggression", Aggression.Passive,
-                "Only used when CombatMode is on. Passive: alerts you to enemies (growls, barks, tells you where) and attacks only when " +
+                Adv("Only used when CombatMode is on. Passive: alerts you to enemies (growls, barks, tells you where) and attacks only when " +
                 "ordered (Over There). Defensive: also goes for enemies that target, shoot or hurt you or the dog. Aggressive: also " +
-                "attacks any hostile AI it detects within the engagement distance.");
+                "attacks any hostile AI it detects within the engagement distance."));
             EngageDistance = Config.Bind("Combat", "Maximum engagement distance", DogRules.DefaultEngage,
-                new ConfigDescription("How far from you, in metres, the dog will go after an enemy.", new AcceptableValueRange<float>(5f, 60f)));
+                Adv("How far from you, in metres, the dog will go after an enemy.", new AcceptableValueRange<float>(5f, 60f)));
             ApproachMode = Config.Bind("Combat", "Approach", DogApproach.Auto,
-                "How the dog goes for an enemy. Auto: straight in if it's really close, and works its way in out of sight if it's further off, " +
+                Adv("How the dog goes for an enemy. Auto: straight in if it's really close, and works its way in out of sight if it's further off, " +
                 "changing as the distance does. Stealth: always works its way in out of sight (behind buildings, walls and bushes), then rushes the " +
-                "last few metres. Direct: runs straight at it.");
-            AutoRushRange = Config.Bind("Combat", "Auto approach: rush within", 14f, new ConfigDescription(
+                "last few metres. Direct: runs straight at it."));
+            AutoRushRange = Config.Bind("Combat", "Auto approach: rush within", 14f, Adv(
                 "Under the Auto approach, an enemy this close (in metres) gets a straight attack.", new AcceptableValueRange<float>(5f, 40f)));
-            DefendRange = Config.Bind("Combat", "Defend range", 100f, new ConfigDescription(
+            DefendRange = Config.Bind("Combat", "Defend range", 100f, Adv(
                 "With 'defends you' or 'any enemy', how far from you (in metres) the dog goes after someone shooting at you or at it, with no order needed. " +
                 "Fights it starts for any other reason stay within the maximum engagement distance.", new AcceptableValueRange<float>(10f, 300f)));
-            ValuableAlert = Config.Bind("Search", "Valuable alert (roubles)", 40000, new ConfigDescription(
+            ValuableAlert = Config.Bind("Search", "Valuable alert (roubles)", 40000, Adv(
                 "In raids the dog barks once at loot near it (loose or in a container) worth at least this much each, and says what and where. 0 = off.",
                 new AcceptableValueRange<int>(0, 1000000)));
-            OrderRange = Config.Bind("Combat", "Ordered attack range", 150f, new ConfigDescription(
+            OrderRange = Config.Bind("Combat", "Ordered attack range", 150f, Adv(
                 "How far away you can send the dog with Over There: at an enemy you aim at (or near), or to hunt where you aim. " +
                 "Fights it starts on its own stay within the maximum engagement distance.", new AcceptableValueRange<float>(25f, 300f)));
-            BitesToKill = Config.Bind("Combat", "Bites to kill", DogRules.DefaultBites, new ConfigDescription(
+            BitesToKill = Config.Bind("Combat", "Bites to kill", DogRules.DefaultBites, Adv(
                 "The dog goes for the throat, under the helmet and any collar: how many bites kill a scav, PMC or player, armour or not. " +
                 "A fraction mixes the two either side: 2.5 = two bites for half of them, three for the rest.", new AcceptableValueRange<float>(1f, 10f)));
-            BossBitesToKill = Config.Bind("Combat", "Bites to kill a boss", DogRules.DefaultBossBites, new ConfigDescription(
+            BossBitesToKill = Config.Bind("Combat", "Bites to kill a boss", DogRules.DefaultBossBites, Adv(
                 "The same for bosses (their guards count as everyone else).", new AcceptableValueRange<float>(1f, 20f)));
             BiteCooldown = Config.Bind("Combat", "Bite cooldown", DogRules.DefaultCooldown,
-                new ConfigDescription("Seconds between bites.", new AcceptableValueRange<float>(.8f, 5f)));
+                Adv("Seconds between bites.", new AcceptableValueRange<float>(.8f, 5f)));
             BiteStagger = Config.Bind("Combat", "Bite stagger", .5f,
-                new ConfigDescription("Seconds a bitten enemy is thrown off (loses its aim, shoots badly) before it turns on the dog. 0 turns it off.", new AcceptableValueRange<float>(0f, 3f)));
+                Adv("Seconds a bitten enemy is thrown off (loses its aim, shoots badly) before it turns on the dog. 0 turns it off.", new AcceptableValueRange<float>(0f, 3f)));
             DogHealth = Config.Bind("Combat", "Dog health", DogRules.DefaultHealth,
-                new ConfigDescription("Hit points per raid when CombatMode is on.", new AcceptableValueRange<float>(30f, 1000f)));
+                Adv("Hit points per raid when CombatMode is on.", new AcceptableValueRange<float>(30f, 1000f)));
             DownedInsteadOfKilled = Config.Bind("Combat", "Downed instead of killed", false,
-                "When the dog's health runs out in a raid it collapses instead of dying, and you can revive it with a K9 veterinary kit " +
+                Adv("When the dog's health runs out in a raid it collapses instead of dying, and you can revive it with a K9 veterinary kit " +
                 "(look at it and press your interact key, or use the kit). It gets up at 35% health. Enemies leave it alone while it's down. " +
-                "If it isn't revived in time, or the raid ends first, that counts as the dog being killed.");
-            BleedOutTime = Config.Bind("Combat", "Downed: time to revive", 180f, new ConfigDescription(
+                "If it isn't revived in time, or the raid ends first, that counts as the dog being killed."));
+            BleedOutTime = Config.Bind("Combat", "Downed: time to revive", 180f, Adv(
                 "Seconds you have to revive a downed dog. Treating it stops the clock. 0 = as long as the raid lasts.", new AcceptableValueRange<float>(0f, 600f)));
             SurvivalNeeds = Config.Bind("Survival", "EnableSurvivalNeeds", true,
                 "Hunger and thirst. They drop slowly while you play, are saved between raids and restarts, and only ever slow the dog down " +
                 "(in combat mode); they never hurt or kill it.");
             HungerDecayRate = Config.Bind("Survival", "HungerDecayRate", 8f,
-                new ConfigDescription("Hunger lost per hour of raid time, in percent (half that while resting in the hideout).", new AcceptableValueRange<float>(0f, 50f)));
+                Adv("Hunger lost per hour of raid time, in percent (half that while resting in the hideout).", new AcceptableValueRange<float>(0f, 50f)));
             ThirstDecayRate = Config.Bind("Survival", "ThirstDecayRate", 12f,
-                new ConfigDescription("Thirst lost per hour of raid time, in percent (half that while resting in the hideout).", new AcceptableValueRange<float>(0f, 50f)));
+                Adv("Thirst lost per hour of raid time, in percent (half that while resting in the hideout).", new AcceptableValueRange<float>(0f, 50f)));
             AutoFeedInHideout = Config.Bind("Survival", "AutoFeedInHideout", true,
-                "In the hideout, top up nearly empty dishes from your stash and gear automatically (dog food or meat, and water).");
+                Adv("In the hideout, top up nearly empty dishes from your stash and gear automatically (dog food or meat, and water)."));
             CarryOverInjuries = Config.Bind("Survival", "CarryOverInjuries", true,
-                "Wounds from a combat-mode raid stay with the dog until they heal (resting at the kennel, or a medical kit in the DOG tab). " +
-                "Below 25% health the dog stays home. Off: the dog starts every raid at full health, as before 0.16.");
+                Adv("Wounds from a combat-mode raid stay with the dog until they heal (resting at the kennel, or a medical kit in the DOG tab). " +
+                "Below 25% health the dog stays home. Off: the dog starts every raid at full health, as before 0.16."));
             CombatMode.SettingChanged += (_, __) => Log.LogInfo("Combat mode " + (CombatMode.Value ? "on" : "off") + ": " + Describe(Rules(false)));
             DogAggression.SettingChanged += (_, __) => Log.LogInfo("Dog aggression: " + Describe(Rules(false)));
-            CarryLimit = Config.Bind("Movement", "Carry limit (kg)", 0f, new ConfigDescription(
+            CarryLimit = Config.Bind("Movement", "Carry limit (kg)", 0f, Adv(
                 "How much the dog's jacket and what's in it can weigh in a raid before the dog slows down: slower in proportion above it, " +
                 "down to half speed at most. 0 = no limit. What the dog carries never counts towards your own weight.", new AcceptableValueRange<float>(0f, 200f)));
             Scale = Config.Bind("Appearance", "Scale", 1f,
-                new ConfigDescription("Dog size; applied when it spawns.", new AcceptableValueRange<float>(0.5f, 2f)));
-            Recall = Config.Bind("Controls", "Recall", new KeyboardShortcut(KeyCode.F8), "Bring the dog back beside you.");
+                Adv("Dog size; applied when it spawns.", new AcceptableValueRange<float>(0.5f, 2f)));
+            Recall = Config.Bind("Controls", "Recall", new KeyboardShortcut(KeyCode.F8), "Call the dog back: it runs to you and follows again.");
+            Bring = Key("Bring dog to me", KeyCode.F8, "Put the dog straight in front of you (for when it's stuck), following you again. " +
+                "Also in the DOG commands of the Y menu.", KeyCode.LeftShift);
+            HealthBar = Config.Bind("Display", "Dog health bar", true,
+                "In raids with combat mode on, the dog's name and health floating over its head, seen through walls.");
             Hideout = Config.Bind("Hideout", "Enabled", true, "Spawn in the hideout as well as raids.");
-            Roam = Config.Bind("Hideout", "Wander when bored", true, "After resting a while the dog gets up, wanders round the hideout, comes to say hello, then goes back to its bed.");
-            DogName = Config.Bind("Appearance", "Name", "K9", "Name on the collar tag and command display.");            Sounds = Config.Bind("Audio", "Enabled", true, "Play companion sounds and recall whistle locally.");
-            RareWhine = Config.Bind("Audio", "Rare whining", true, "Occasional quiet whine while resting; suppressed when crouching.");
+            Roam = Config.Bind("Hideout", "Wander when bored", true, Adv("After resting a while the dog gets up, wanders round the hideout, comes to say hello, then goes back to its bed."));
+            DogName = Config.Bind("Appearance", "Name", "K9", Adv("Name on the collar tag and command display."));            Sounds = Config.Bind("Audio", "Enabled", true, "Play companion sounds and recall whistle locally.");
+            RareWhine = Config.Bind("Audio", "Rare whining", true, Adv("Occasional quiet whine while resting; suppressed when crouching."));
             Volume = Config.Bind("Audio", "Volume", 0.35f, new ConfigDescription("Local companion sound volume.", new AcceptableValueRange<float>(0, 1)));
-            BreathingVolume = Config.Bind("Audio", "Breathing volume", 0.175f, new ConfigDescription(
+            BreathingVolume = Config.Bind("Audio", "Breathing volume", 0.175f, Adv(
                 "How loud the dog's breathing is, next to its other sounds (it breathes all the time: quietly at rest, harder after running or when hurt). 0 = silent.",
                 new AcceptableValueRange<float>(0, 1)));
             Stay = Key("Stay or follow", KeyCode.F7, "Toggle stay and follow.");
@@ -152,17 +162,18 @@ namespace K9Companion
             Water = Key("Water", KeyCode.F10, "Refill the water dish in the hideout.", KeyCode.LeftShift);
             DogCamKey = Key("Dog camera", KeyCode.F6, "Show or hide the dog camera feed (raids, when the dog wears a camera).");
             DogCamShow = Config.Bind("Dog camera", "Show feed", true,
-                "Top left of the screen in a raid: what the dog's camera sees, when it wears the camera vest or the clip-on action camera.");
-            DogCamSize = Config.Bind("Dog camera", "Size", .24f, new ConfigDescription("Height of the feed, as a share of the screen's height.", new AcceptableValueRange<float>(.12f, .45f)));
-            DogCamFps = Config.Bind("Dog camera", "Frames per second", 15, new ConfigDescription(
+                Adv("Top left of the screen in a raid: what the dog's camera sees, when it wears the camera vest or the clip-on action camera."));
+            DogCamSize = Config.Bind("Dog camera", "Size", .24f, Adv("Height of the feed, as a share of the screen's height.", new AcceptableValueRange<float>(.12f, .45f)));
+            DogCamFps = Config.Bind("Dog camera", "Frames per second", 15, Adv(
                 "How often the feed updates. Each update draws the scene once more, so lower is cheaper.", new AcceptableValueRange<int>(5, 30)));
-            DogCamPosition = Config.Bind("Dog camera", "Position", DogCamPlace.NextToHealth,
-                "Where the feed shows: top left next to the health figure, top left corner, or top right.");
+            DogCamPosition = Config.Bind("Dog camera", "Position", DogCamPlace.UnderHealth,
+                Adv("Where the feed shows: top left under your health figure, clear of your status " +
+                "effects; the top left corner; or top right."));
             DogCamQuality = Config.Bind("Dog camera", "Resolution", K9Companion.DogCamQuality.Medium,
-                "Low: 384x216, no shadows or grass, less detail (cheapest). Medium: 640x360 with grass, haze and shadows close by. " +
-                "High: as sharp as the feed is on screen (up to 960x540), full detail, shadows further out. Higher costs more.");
+                Adv("Low: 384x216, no shadows or grass, less detail (cheapest). Medium: 640x360 with grass, haze and shadows close by. " +
+                "High: as sharp as the feed is on screen (up to 960x540), full detail, shadows further out. Higher costs more."));
             DogCamGrass = Config.Bind("Dog camera", "Grass", true,
-                "Draw the game's grass and bushes in the feed (Medium and High). Off is a little cheaper.");
+                Adv("Draw the game's grass and bushes in the feed (Medium and High). Off is a little cheaper."));
             // After every setting is bound: it updates some of them. A failure here mustn't stop the dog loading.
             try { Retire(); } catch (Exception e) { Logger.LogError("Updating old settings failed (they stay as they were): " + e); }
             AssetFolder = Path.GetDirectoryName(Info.Location);
@@ -206,7 +217,8 @@ namespace K9Companion
         private void Retire()
         {
             // Version 2: dog health default raised from 150 to 300; an untouched old default is moved up with it.
-            var configVersion = Config.Bind("Internal", "Config version", 1, "Used to update old settings. Do not edit.");
+            var configVersion = Config.Bind("Internal", "Config version", 1, new ConfigDescription("Used to update old settings. Do not edit.", null,
+                new ConfigurationManagerAttributes { Browsable = false }));
             if (configVersion.Value < 2 && Mathf.Approximately(DogHealth.Value, 150f)) DogHealth.Value = DogRules.DefaultHealth;
             // Version 3: the dog attacks only on command by default (it used to default to Defensive).
             if (configVersion.Value < 3 && DogAggression.Value == Aggression.Defensive) DogAggression.Value = Aggression.Passive;
@@ -288,7 +300,7 @@ namespace K9Companion
                 if (!Active.Value || __instance == null ||
                     (string.Equals(__instance.LocationId, "hideout", StringComparison.OrdinalIgnoreCase) || __instance.MainPlayer is HideoutPlayer) ||
                     __instance.GetComponent<Companion>() != null) return;
-                bool deployed = DogBag.Deployed ?? K9.NotDeployable() == null;
+                bool deployed = DogBag.Deployed ?? K9.NotDeployable(__instance.MainPlayer?.Side == EPlayerSide.Savage) == null;
                 DogBag.Deployed = null;
                 // Fika only knows who's in the raid for certain now: a host decides before everyone has joined. Any jacket
                 // already on its way stays with your gear: back in the stash when you get out, as usual.
@@ -298,7 +310,7 @@ namespace K9Companion
                     K9.RaidStart(false);
                     EFT.Communications.NotificationManager.DisplayWarningNotification(DogName.Value + " stays out of this raid: solo raids only.");
                 }
-                if (!deployed) { DogPreload.Release(); Log.LogInfo("No dog this raid (" + (K9.NotDeployable() ?? "not deployed") + ")."); return; }
+                if (!deployed) { DogPreload.Release(); Log.LogInfo("No dog this raid (" + (K9.NotDeployable(__instance.MainPlayer?.Side == EPlayerSide.Savage) ?? "not deployed") + ")."); return; }
                 __instance.gameObject.AddComponent<Companion>();
             }
             catch (Exception e) { Log.LogError("Dog raid setup failed: " + e); }
@@ -351,9 +363,10 @@ namespace K9Companion
 
     internal enum DogCamQuality { Low, Medium, High }
 
-    internal enum DogCamPlace { NextToHealth, TopLeft, TopRight }
+    // UnderHealth was NextToHealth before 1.2.0 (beside the health figure, over the status effects); an old setting reads as the default.
+    internal enum DogCamPlace { UnderHealth, TopLeft, TopRight }
 
-    internal enum DogOrder { OverThere, ComeHere, Sit, LieDown, OpenBag, Feed, Water, GoToBed, Stay, Follow, Search, FetchMeds, FetchFood, AttackMode, ApproachMode }
+    internal enum DogOrder { OverThere, ComeHere, Sit, LieDown, OpenBag, Feed, Water, GoToBed, Stay, Follow, Search, FetchMeds, FetchFood, AttackMode, ApproachMode, BringHere }
 
     // How it goes for an enemy. Auto: straight at one really close, stalking one further off, changing as the distance does.
     internal enum DogApproach { Auto, Stealth, Direct }

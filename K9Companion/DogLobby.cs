@@ -47,7 +47,7 @@ namespace K9Companion
         }
 
         // Whether the dog is coming on this raid (it's set, and it's fit to).
-        private static bool Coming => K9.Owned && Plugin.Active.Value && K9.NotDeployable() == null;
+        private static bool Coming(bool scav) => K9.Owned && Plugin.Active.Value && K9.NotDeployable(scav) == null;
 
         internal static DogStage Stage
         {
@@ -73,6 +73,11 @@ namespace K9Companion
 
         private static void Shown(MatchMakerAcceptScreen __instance, IEftSession session, RaidSettings raidSettings)
         {
+            // A new raid is being set up: what went into the last one (a Scav raid's "nothing") no longer counts. The dog's
+            // loadout reads the live profile until this raid's own snapshot is taken (DogBag, as the raid is created; with
+            // Fika that's after the loading screen has been up a while). Before the Fika check below: with Fika this
+            // screen is its server browser, but it's still shown before every raid.
+            DogGear.RaidLoadoutTaken = false;
             try
             {
                 Closed();
@@ -99,7 +104,7 @@ namespace K9Companion
             try
             {
                 Profile profile = session?.Profile;
-                if (profile == null || !Coming) return;
+                if (profile == null || !Coming(!raidSettings.IsPmc)) return;
                 Stage.Dress(raidSettings.IsPmc ? profile : null);
                 DogDeployRow.Create(__instance, raidSettings.IsPmc ? profile : null);
             }
@@ -301,11 +306,11 @@ namespace K9Companion
         private void Refresh()
         {
             DogNeeds needs = NeedsStore.Current;
-            string stays = K9.NotDeployable();
+            string stays = K9.NotDeployable(!pmc);
             bool going = Plugin.Active.Value && stays == null;
             takeLabel.text = "TAKE DOG: " + (Plugin.Active.Value ? "YES" : "NO");
             string state = needs == null ? "" : $"Health {Mathf.RoundToInt(needs.Health)}%   Hunger {Mathf.RoundToInt(needs.Hunger)}%   Thirst {Mathf.RoundToInt(needs.Thirst)}%\n";
-            string note = stays != null ? "Stays home: " + stays + "." : !Plugin.Active.Value ? "Stays home this raid." : pmc ? "Comes with you." : "Comes with you (no gear on a Scav raid).";
+            string note = stays != null ? "Stays home: " + stays + "." : !Plugin.Active.Value ? "Stays home this raid." : "Comes with you.";
             status.text = state + (going ? "<color=#9fc29a>" : "<color=#d9a066>") + note + "</color>";
         }
 
@@ -386,8 +391,16 @@ namespace K9Companion
                 item._eyeButton.OnClick.Subscribe(() => DogLoadout.Toggle(row.profile, screen.transform));
             }
             // The copy's own script would answer its clicks as your line's; this row answers them instead, through a
-            // see-through background that catches the pointer (the script's own did, and went with it).
+            // see-through background that catches the pointer (the script's own did, and went with it). The copy's other
+            // pointer handlers go too (the name's own click handler took the click on the name before it got here), all
+            // but the eye's, which opens the loadout.
+            Transform eye = item._eyeButton != null ? ((Component)item._eyeButton).transform : null;
             DestroyImmediate(item);
+            foreach (MonoBehaviour handler in copy.GetComponentsInChildren<MonoBehaviour>(true))
+            {
+                if (handler == null || handler is DogDeployRow || (eye != null && handler.transform.IsChildOf(eye))) continue;
+                if (handler is IPointerClickHandler || handler is IPointerDownHandler || handler is IPointerUpHandler) DestroyImmediate(handler);
+            }
             if (copy.GetComponent<Graphic>() == null) copy.AddComponent<Image>().color = new Color(0, 0, 0, .001f);
             // Clicking any player's line (or eye) puts that player back in the big picture.
             party.OnPlayerClick += _ => { if (row != null) row.ShowDog(false); };
@@ -396,6 +409,13 @@ namespace K9Companion
         public void OnPointerClick(PointerEventData data)
         {
             if (data.button == PointerEventData.InputButton.Left) ShowDog(true);
+        }
+
+        // Fika rebuilds the party list as players join (its rows go in after this one): the dog stays at the bottom.
+        private void LateUpdate()
+        {
+            Transform list = transform.parent;
+            if (list != null && transform.GetSiblingIndex() != list.childCount - 1) transform.SetAsLastSibling();
         }
 
         public void OnPointerEnter(PointerEventData data) { if (hover != null) hover.SetActive(true); }

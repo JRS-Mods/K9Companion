@@ -91,6 +91,7 @@ namespace K9Companion
             {
                 case DogOrder.OverThere: OrderAttack(owner); break;
                 case DogOrder.ComeHere: Plugin.Log.LogInfo("Come here."); Recall(owner, IsHideout); break;
+                case DogOrder.BringHere: BringHere(owner); break;
                 case DogOrder.Sit: OrderSit(); break;
                 case DogOrder.Follow: SetCommand(Command.Follow); Say("Follow me."); K9.Report("follow"); break;
                 case DogOrder.LieDown: SetCommand(Command.Down); Say("Lie down."); break;
@@ -128,6 +129,54 @@ namespace K9Companion
             if (hideout && !Reachable(owner.Transform.position) && FindPoint(owner.Transform.position, out Vector3 p)) Teleport(p, owner.Transform.position);
             Say("Come here!");
             K9.Report("come");
+        }
+
+        // Put straight in front of you (stuck indoors, lost on the far side of a fence) and following again. Not while
+        // it's dead or downed: it stays where it fell.
+        internal void BringHere(Player owner)
+        {
+            if (dog == null || owner == null) return;
+            if (dead) { Say(DeadNote + "."); return; }
+            Vector3 at = owner.Transform.position;
+            if (!FindPoint(at, out Vector3 point, owner.LookDirection)) { Say("No room in front of you for " + Plugin.DogName.Value + "."); return; }
+            SetCommand(Command.Follow);
+            Teleport(point, at);
+            audio?.Play("whistle", true);
+            Say(Plugin.DogName.Value + " is here.");
+        }
+
+        /// <summary>
+        /// Off a killed dog, for good: its jacket (and what's in it) into your own gear, its head gear and camera with it.
+        /// If you get out alive the server puts it all back on the dog; if you die it's lost with the rest of your gear.
+        /// </summary>
+        internal void TakeGear(Player owner)
+        {
+            if (!Killed || owner == null || IsHideout) return;
+            if (DogBag.GearTaken) { Say("You've already taken its gear."); return; }
+            if (Vector3.Distance(owner.Transform.position, dog.transform.position) > 3f) { Say("Get closer to the dog."); return; }
+            CompoundItem jacket = DogBag.FindInRaid(owner);
+            bool kit = DogGear.RaidHead != null || DogGear.RaidCamera != null;
+            if (jacket == null && !kit) { Say(Plugin.DogName.Value + " wore no gear this raid."); return; }
+            string name = Plugin.DogName.Value;
+            string jacketName = jacket?.LocalizedName();
+            void Taken()
+            {
+                DogBag.TookGear();
+                decor?.SetVest(null); decor?.SetHead(null); decor?.SetCamera(false);
+                string what = jacket != null ? jacketName + (DogGear.RaidHead != null ? " and head gear" : "") : "head gear";
+                Say($"You take {name}'s {what}. Get out alive and it's back on the dog.");
+            }
+            if (jacket == null) { Taken(); return; }
+            InventoryController controller = owner.InventoryController;
+            if (controller == null) { Say("Can't take its gear right now."); return; }
+            var move = ItemManipulator.QuickFindAppropriatePlace(jacket, controller,
+                new CompoundItem[] { controller.Inventory.Equipment }, ItemManipulator.EMoveItemOrder.PickUp, simulate: true);
+            if (move.Failed) { Say("No room in your gear for its " + jacketName + ". Make room, or empty it first."); return; }
+            controller.TryRunNetworkTransaction(move, result =>
+            {
+                if (result.Succeed) Taken();
+                else Say("Its jacket couldn't be taken: " + result.Error);
+            });
         }
 
         private void OrderSit()
@@ -244,7 +293,7 @@ namespace K9Companion
             InitNeeds();
             // The bed and bowls are the kennel's: a new handler has them once the Makeshift Kennel is built.
             if (IsHideout) { kennelLevel = K9.Kennel(); if (kennelLevel >= 1) SetUpKennel(); else Plugin.Log.LogInfo("No kennel built yet: the dog has no bed or bowls."); }
-            else { InitCombat(); dog.gameObject.AddComponent<DogCam>().Dog = this; }
+            else { InitCombat(); dog.gameObject.AddComponent<DogCam>().Dog = this; dog.gameObject.AddComponent<DogHud>().Dog = this; }
         }
 
         // Where the dog's camera looks from in a raid (DogCam), or null when it wears none: the camera vest's own first,
@@ -269,23 +318,26 @@ namespace K9Companion
 
         private void Commands(Player owner, bool hideout)
         {
+            // An F-key you've bound to something in the game's own Y-menu binds is the game's (see GameBinds).
+            bool Pressed(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> key) => GameBinds.Pressed(key, Say, owner.Side == EPlayerSide.Savage);
             // Specific modified bindings take precedence over their unmodified equivalents.
-            if (Plugin.Feed.Value.IsDown()) { Care(owner, hideout, true); return; }
-            if (Plugin.Water.Value.IsDown()) { Care(owner, hideout, false); return; }
-            if (Plugin.Lie.Value.IsDown()) { if (hideout) GoToBed(); else { SetCommand(Command.Down); Say("Lie down."); } return; }
-            if (Plugin.Recall.Value.IsDown())
+            if (Pressed(Plugin.Feed)) { Care(owner, hideout, true); return; }
+            if (Pressed(Plugin.Water)) { Care(owner, hideout, false); return; }
+            if (Pressed(Plugin.Lie)) { if (hideout) GoToBed(); else { SetCommand(Command.Down); Say("Lie down."); } return; }
+            if (Pressed(Plugin.Bring)) { BringHere(owner); return; }
+            if (Pressed(Plugin.Recall))
             {
                 Recall(owner, hideout); return;
             }
-            if (Plugin.Stay.Value.IsDown())
+            if (Pressed(Plugin.Stay))
             {
                 SetCommand(command == Command.Follow ? Command.Stay : Command.Follow);
                 Say(command == Command.Stay ? "Stay." : "Follow me.");
                 if (command == Command.Follow) K9.Report("follow");
                 return;
             }
-            if (Plugin.Pet.Value.IsDown()) { PetDog(owner); return; }
-            if (Plugin.Rename.Value.IsDown())
+            if (Pressed(Plugin.Pet)) { PetDog(owner); return; }
+            if (Pressed(Plugin.Rename))
             {
                 if (Vector3.Distance(owner.Transform.position, dog.transform.position) > 3) { Say("Move closer to rename your dog."); return; }
                 RenameDialog.Open(this);
@@ -397,11 +449,18 @@ namespace K9Companion
                 Starts = (byte)model.Starts, Looping = model.Looping, Walking = model.Walking, Low = Low, Resting = Resting, Targetable = Targetable, Dead = dead
             });
         }
-        // Only short status messages (bottom left); the commands live in the game's Y menu under DOG.
+        // Only short status messages; the commands live in the game's Y menu under DOG. Along the very bottom of the
+        // screen, just right of where Fika writes its version, as wide as the message: bottom left is your stance and
+        // stamina, and the middle of the screen is for seeing.
+        private GUIContent shownMessage;
         private void OnGUI()
         {
             if (dog == null || CurrentPlayer == null || CurrentPlayer.IsInventoryOpened) return;
-            if (Time.unscaledTime < messageUntil) GUI.Box(new Rect(20, Screen.height - 90, 460, 40), message);
+            if (Time.unscaledTime >= messageUntil) return;
+            if (shownMessage == null || shownMessage.text != message) shownMessage = new GUIContent(message);
+            Vector2 size = GUI.skin.box.CalcSize(shownMessage);
+            float width = Mathf.Min(size.x + 24, Screen.width * .6f), height = Mathf.Max(26, size.y + 6);
+            GUI.Box(new Rect(Screen.width * .26f, Screen.height - height - Screen.height * .015f, width, height), shownMessage);
         }
         private int kennelLevel;
         private float nextKennelCheck;
@@ -797,11 +856,63 @@ namespace K9Companion
     /// (hover, click or release Y). Commands can also be bound to F-keys with a right-click, the same way as phrases.
     /// Each command uses an id far outside the game's phrase range; picking one is caught before the game would try to say it.
     /// </summary>
+    /// <summary>
+    /// The game's own F-key binds (right-click a phrase or DOG command in the Y menu's bind list): F1-F12, tapped or
+    /// double-tapped. One of the mod's keys on an F-key you've bound there would fire both, so the bind wins and the mod's
+    /// key stands aside (it says so once). Keys with Shift and the like aren't affected.
+    /// </summary>
+    internal static class GameBinds
+    {
+        private static readonly HashSet<KeyCode> bound = new HashSet<KeyCode>(), told = new HashSet<KeyCode>();
+        private static string readFor;
+        private static float readAt = -10;
+
+        internal static bool Pressed(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> entry, Action<string> say, bool scav)
+        {
+            var key = entry.Value;
+            if (!key.IsDown()) return false;
+            if (key.Modifiers.Any() || !Bound(key.MainKey, scav)) return true;
+            if (told.Add(key.MainKey))
+                say?.Invoke($"{key.MainKey} is bound in the game's Y-menu binds, so the mod's \"{entry.Definition.Key}\" key is off. Pick another key in F12, or unbind {key.MainKey}.");
+            return false;
+        }
+
+        private static bool Bound(KeyCode key, bool scav)
+        {
+            if (key < KeyCode.F1 || key > KeyCode.F12) return false;
+            string name = scav ? "ScavBindCommands" : "BindCommands";
+            if (name != readFor || Time.unscaledTime - readAt > 2) Read(name);
+            return bound.Contains(key);
+        }
+
+        // Saved by the game as soon as a bind changes, as {"F7": phrase, "DoubleF8": phrase}; nothing saved yet is the
+        // game's default (F1).
+        private static void Read(string name)
+        {
+            readFor = name; readAt = Time.unscaledTime;
+            bound.Clear();
+            try
+            {
+                string json = PlayerPrefs.GetString(name);
+                if (string.IsNullOrEmpty(json)) { bound.Add(KeyCode.F1); return; }
+                foreach (var p in Newtonsoft.Json.Linq.JObject.Parse(json).Properties())
+                {
+                    if (!Enum.TryParse(p.Name, out ECommand command)) continue;
+                    string text = command.ToString();
+                    if (text.StartsWith("Double")) text = text.Substring(6);
+                    if (text.Length > 1 && text[0] == 'F' && int.TryParse(text.Substring(1), out int n) && n >= 1 && n <= 12)
+                        bound.Add(KeyCode.F1 + (n - 1));
+                }
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("Couldn't read the game's F-key binds (the mod's keys work as usual): " + e.Message); }
+        }
+    }
+
     internal static class DogMenu
     {
         private const int Base = 7300;
-        private static readonly DogOrder[] Orders = { DogOrder.OverThere, DogOrder.ComeHere, DogOrder.Sit, DogOrder.LieDown, DogOrder.OpenBag, DogOrder.Feed, DogOrder.Water, DogOrder.GoToBed, DogOrder.Stay, DogOrder.Follow, DogOrder.Search, DogOrder.FetchMeds, DogOrder.FetchFood, DogOrder.AttackMode, DogOrder.ApproachMode };
-        private static readonly string[] Labels = { "Over there (attack)", "Come here", "Sit", "Lie down", "Open jacket", "Feed", "Give water", "Go to bed", "Stay", "Follow", "Search (removed)", "Fetch (removed)", "Fetch (removed)", "When to attack", "Approach" };
+        private static readonly DogOrder[] Orders = { DogOrder.OverThere, DogOrder.ComeHere, DogOrder.Sit, DogOrder.LieDown, DogOrder.OpenBag, DogOrder.Feed, DogOrder.Water, DogOrder.GoToBed, DogOrder.Stay, DogOrder.Follow, DogOrder.Search, DogOrder.FetchMeds, DogOrder.FetchFood, DogOrder.AttackMode, DogOrder.ApproachMode, DogOrder.BringHere };
+        private static readonly string[] Labels = { "Over there (attack)", "Come here", "Sit", "Lie down", "Open jacket", "Feed", "Give water", "Go to bed", "Stay", "Follow", "Search (removed)", "Fetch (removed)", "Fetch (removed)", "When to attack", "Approach", "Bring to me" };
         // New commands go on the end: the ids (Base + position) are what F-key bindings remember. Search and the two
         // fetches were taken out in 0.30: their places stay (an old binding just does nothing) but they're not in the menu.
         private static readonly HashSet<DogOrder> Retired = new HashSet<DogOrder> { DogOrder.Search, DogOrder.FetchMeds, DogOrder.FetchFood };
@@ -1059,6 +1170,8 @@ namespace K9Companion
             Companion dog = target.Dog;
             CompoundItem jacket = DogBag.FindInRaid(player);
             var state = new AvailableInteractionState();
+            if (dog != null && dog.Killed && !DogBag.GearTaken && (jacket != null || DogGear.RaidHead != null || DogGear.RaidCamera != null))
+                state.Actions.Add(new InteractionAction { Name = "Take " + Plugin.DogName.Value + "'s gear", Action = () => dog.TakeGear(player) });
             if (dog != null && dog.Downed)
             {
                 Item kit = dog.ReviveKit(player);

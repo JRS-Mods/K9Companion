@@ -77,6 +77,14 @@ namespace K9Companion
         internal float HealthMax => rules.Health;
         internal bool IsDead => dead;
         internal bool Downed => downed;
+        // Just over its head: where its health bar floats.
+        internal Vector3 OverheadPoint => dog == null ? Vector3.zero : (headBone != null ? headBone.position : dog.transform.position + Vector3.up * .7f) + Vector3.up * .35f;
+        // In combat mode this raid (only then can it be hurt).
+        internal bool CanBeHurt => rules.Combat;
+        // Seconds left to revive a downed dog; negative when there's no clock (or it isn't down).
+        internal float DownedSecondsLeft => downed && downedUntil > 0 ? Mathf.Max(0, downedUntil - Time.time) : -1;
+        // Killed for good (not lying downed, waiting to be revived).
+        internal bool Killed => dead && !downed;
         private string DeadNote => Plugin.DogName.Value + (downed ? " is down" : " is dead");
         internal float DistanceTo(Player player) => dog == null || player == null ? float.MaxValue : Vector3.Distance(dog.transform.position, player.Transform.position);
         internal Player Owner => CurrentPlayer;
@@ -427,6 +435,9 @@ namespace K9Companion
         // goes for them with no order given, within the defend range; on order, it only tells you where they are.
 
         private const float NearMiss = 2.5f, RememberShot = 12f, SwitchFrom = 8f;
+        // An enemy this much nearer than the one shooting at you (or the one it's after) is dealt with first: the one in
+        // front of you before one firing from across the field.
+        private const float NearerBy = 10f;
         private Player lastShooter;
         private float lastShotAt;
         private bool defending;
@@ -507,12 +518,13 @@ namespace K9Companion
                 if (Wounded || command != Command.Follow || actionClip != null || Time.time < nextScan) return;
                 nextScan = Time.time + .5f;
                 Player under = rules.CanAttack ? Shooter(owner) : null;
-                if (under != null)
+                Player found = FindEnemy(owner);
+                bool nearerFirst = under != null && found != null && found != under && DistanceTo(found) + NearerBy < DistanceTo(under);
+                if (under != null && !nearerFirst)
                 {
                     if (rules.AutoEngage) { GoForShooter(under); return; }
                     Alert(under, owner);
                 }
-                Player found = FindEnemy(owner);
                 if (found == null) return;
                 // Passive: it only alerts you, and goes in when ordered (Over There).
                 if (!rules.AutoEngage) { Alert(found, owner); return; }
@@ -528,8 +540,17 @@ namespace K9Companion
                 && (brain.State == CombatState.Return || (brain.State == CombatState.Chase && (!brain.Ordered || defending))))
             {
                 nextScan = Time.time + .5f;
-                Player under = Shooter(owner);
-                if (under != null && under != attackTarget && DistanceTo(attackTarget) > SwitchFrom) { GoForShooter(under); return; }
+                Player under = Shooter(owner), near = FindEnemy(owner);
+                float current = DistanceTo(attackTarget);
+                if (near != null && near != attackTarget && current > SwitchFrom
+                    && DistanceTo(near) + NearerBy < Mathf.Min(current, under != null ? DistanceTo(under) : float.MaxValue))
+                {
+                    Engage(near, false);
+                    audio?.Play("bark");
+                    Say(Plugin.DogName.Value + " turns on " + near.Profile.Nickname + ": nearer.");
+                    return;
+                }
+                if (under != null && under != attackTarget && current > SwitchFrom) { GoForShooter(under); return; }
             }
             if (Wounded && (!brain.Ordered || defending) && brain.State != CombatState.Return)
             {
@@ -584,25 +605,33 @@ namespace K9Companion
             return s;
         }
 
+        // The nearest enemy it notices and can get to. One it can't reach (across water, up on a roof) is passed over for
+        // the next nearest, rather than nobody (a few path checks at most).
+        private readonly List<(Player Who, float Distance)> candidates = new List<(Player, float)>();
         private Player FindEnemy(Player owner)
         {
             if (world == null) return null;
             Vector3 me = dog.transform.position, mine = owner.Transform.position;
-            Player best = null; float bestDistance = float.MaxValue;
+            candidates.Clear();
             foreach (Player p in world.AllAlivePlayersList)
             {
                 if (!IsEnemy(p, owner)) continue;
                 if (ignored.TryGetValue(p.ProfileId, out float until) && Time.time < until) continue;
                 Vector3 at = p.Transform.position;
                 if (Vector3.Distance(at, mine) > rules.EngageDistance) continue;
-                float d = Vector3.Distance(at, me);
-                if (d >= bestDistance) continue;
+                candidates.Add((p, Vector3.Distance(at, me)));
+            }
+            candidates.Sort((a, b) => a.Distance.CompareTo(b.Distance));
+            int pathChecks = 0;
+            foreach (var (p, d) in candidates)
+            {
                 if (rules.Aggression == Aggression.Defensive && !Threatens(p, owner)) continue;
                 // The dog notices what it can see, or smell and hear close by. Walls hide anything further away.
                 if (d > ScentRange && !ClearLine(HeadPoint, Body(p))) continue;
-                best = p; bestDistance = d;
+                if (Reachable(p.Transform.position)) return p;
+                if (++pathChecks >= 3) break;
             }
-            return best != null && Reachable(best.Transform.position) ? best : null;
+            return null;
         }
 
         private bool Reachable(Vector3 point)

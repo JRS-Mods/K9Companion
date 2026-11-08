@@ -44,6 +44,8 @@ public sealed class BagRouter(JsonUtil json, BagKeeper keeper) : StaticRouter(js
         (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.RaidStart(sessionId, info?.BagId, info?.KitIds))),
     new RouteAction<BagEmptyRequest>("/k9companion/bag/dog-died",
         (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.DogDied(sessionId))),
+    new RouteAction<BagEmptyRequest>("/k9companion/bag/gear-taken",
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.GearTaken(sessionId))),
     new RouteAction<BagEmptyRequest>("/k9companion/bag/dog-revived",
         (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.DogRevived(sessionId)))
 ]);

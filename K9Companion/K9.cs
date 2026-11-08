@@ -147,12 +147,13 @@ namespace K9Companion
 
         internal const float DeployFrom = 25f;
 
-        /// <summary>Why the dog can't go into a raid with you now, or null.</summary>
-        internal static string NotDeployable()
+        /// <summary>Why the dog can't go into a raid with you now (a Scav raid if scav), or null. It never comes on Scav raids.</summary>
+        internal static string NotDeployable(bool scav = false)
         {
             EnsureLoaded();
             if (!Owned) return "you have no dog yet";
             if (Plugin.SoloOnly && DogNet.InGroup) return "dogs only come on solo raids, and this is a group raid";
+            if (scav) return "dogs don't come on Scav raids";
             DogNeeds needs = NeedsStore.Current;
             if (Plugin.CarryOverInjuries.Value && needs != null && needs.Health < DeployFrom) return Plugin.DogName.Value + " is too badly hurt to deploy (" + Mathf.RoundToInt(needs.Health) + "%)";
             return null;
