@@ -551,6 +551,16 @@ namespace K9Companion
             shown.Clear(); offsets.Clear();
         }
 
+        // Loose loot in a building is registered with the room's culling, which switches the game model's renderers back on
+        // whenever the room comes into view (LootItem.RegisterInCullingObject): they'd show through ours, the dog meat as
+        // a pack of Tarker dried meat. They're kept off.
+        private void LateUpdate()
+        {
+            if (shown.Count == 0) return;
+            for (int i = 0; i < hidden.Count; i++)
+                if (hidden[i] != null && hidden[i].enabled) hidden[i].enabled = false;
+        }
+
         // Put away (back into the game's pool): the game's model as it was.
         private void OnDisable() => Restore();
     }

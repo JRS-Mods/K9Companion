@@ -19,7 +19,7 @@ namespace K9Companion
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id = "jrs.k9companion";
-        public const string Version = "1.2.2";
+        public const string Version = "1.3.0";
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> Active, CombatMode, SurvivalNeeds, AutoFeedInHideout, CarryOverInjuries;
         internal static ConfigEntry<DogApproach> ApproachMode;
@@ -38,7 +38,7 @@ namespace K9Companion
         internal static void SaveName(string name) { DogName.Value = name; instance.Config.Save(); }        private float nextHideout, nextOwnerCheck;
         private bool ready;
         internal static ConfigEntry<bool> Hideout, Sounds, RareWhine, Roam;
-        internal static ConfigEntry<string> DogName;
+        internal static ConfigEntry<string> DogName, Language;
         internal static ConfigEntry<float> Volume, BreathingVolume;
         internal static ConfigEntry<KeyboardShortcut> Stay, Lie, Rename, Pet, Feed, Water, DogCamKey;
         internal static ConfigEntry<bool> DogCamShow;
@@ -52,6 +52,7 @@ namespace K9Companion
         // and water steps, and its extra colour effects. Each can be flipped in a raid to see what it does.
         internal static ConfigEntry<bool> DogCamGrass;
         internal static ConfigEntry<DogCamPlace> DogCamPosition;
+        internal static ConfigEntry<float> DogCamNudgeX, DogCamNudgeY;
         private ConfigEntry<KeyboardShortcut> Key(string name, KeyCode key, string description, params KeyCode[] modifiers)
             => Config.Bind("Controls", name, new KeyboardShortcut(key, modifiers), description);
 
@@ -169,11 +170,19 @@ namespace K9Companion
             DogCamPosition = Config.Bind("Dog camera", "Position", DogCamPlace.UnderHealth,
                 Adv("Where the feed shows: top left under your health figure, clear of your status " +
                 "effects; the top left corner; or top right."));
+            DogCamNudgeX = Config.Bind("Dog camera", "Move right", 0f, Adv(
+                "Moves the feed from its Position, as a share of the screen's width (negative moves it left).", new AcceptableValueRange<float>(-.8f, .8f)));
+            DogCamNudgeY = Config.Bind("Dog camera", "Move down", 0f, Adv(
+                "Moves the feed from its Position, as a share of the screen's height (negative moves it up). " +
+                "For top right, about 0.06 clears a raid timer there.", new AcceptableValueRange<float>(-.8f, .8f)));
             DogCamQuality = Config.Bind("Dog camera", "Resolution", K9Companion.DogCamQuality.Medium,
                 Adv("Low: 384x216, no shadows or grass, less detail (cheapest). Medium: 640x360 with grass, haze and shadows close by. " +
                 "High: as sharp as the feed is on screen (up to 960x540), full detail, shadows further out. Higher costs more."));
             DogCamGrass = Config.Bind("Dog camera", "Grass", true,
                 Adv("Draw the game's grass and bushes in the feed (Medium and High). Off is a little cheaper."));
+            Language = Config.Bind("Display", "Language", "auto", Adv(
+                "Language of the mod's own text: auto follows the game's; or a file name from the mod's lang folder without .json (en, ru...). " +
+                "To translate, copy lang/en.json to lang/<language>.json (ru, fr, ge, es...) and replace the English on the right of each line."));
             // After every setting is bound: it updates some of them. A failure here mustn't stop the dog loading.
             try { Retire(); } catch (Exception e) { Logger.LogError("Updating old settings failed (they stay as they were): " + e); }
             AssetFolder = Path.GetDirectoryName(Info.Location);

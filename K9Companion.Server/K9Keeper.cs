@@ -824,7 +824,7 @@ public sealed class DogFoodItems(CustomItemService items, TemplateTable template
         {
             ItemTplToClone = clone, NewId = id, ParentId = templates.Items[clone].Parent, NewItemName = name,
             HandbookParentId = "5b47574386f77428ca22b336", HandbookPriceRoubles = price, FleaPriceRoubles = price,
-            Locales = new Dictionary<string, LocaleDetails> { ["en"] = new() { Name = full, ShortName = shortName, Description = description } }
+            Locales = K9Lang.Locales(new LocaleDetails { Name = full, ShortName = shortName, Description = description })
         });
         if (!result.Success) logger.Error($"[K9Companion] Couldn't create {full}: " + string.Join("; ", result.Errors ?? new List<string>()));
     }

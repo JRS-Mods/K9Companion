@@ -92,10 +92,11 @@ public sealed class K9Quests(TemplateTable templates, TradersTable traders, Loca
             added++;
         }
         logger.Info($"[K9Companion] {pictures} quest pictures; the rest show Dr. Yang's portrait.");
-        foreach (var language in locales.Global.Values)
+        K9Lang.Note(text.Values);
+        foreach (var (code, language) in locales.Global)
             language.AddTransformer(data =>
             {
-                if (data != null) foreach (var (key, value) in text) data[key] = value;
+                if (data != null) foreach (var (key, value) in text) data[key] = K9Lang.T(code, value);
                 return data;
             });
         // Offers that a quest unlocks at Dr. Yang's: listed under "success" in his quest assort, as for vanilla traders.
@@ -160,8 +161,8 @@ public sealed class K9Quests(TemplateTable templates, TradersTable traders, Loca
 
         // ---- 3 ------------------------------------------------------------------------------------------------
         Begin(K9Ids.TrustIsEarned, "Trust Is Earned", K9Ids.MissingUnit, 12);
-        string food = Leave("Stash found in raid dog food in the ZB-016 bunker on Woods", DogFood, "huntsman_005_1", 20);
-        string water = Leave("Stash found in raid drinking water in the ZB-016 bunker on Woods", DrinkingWater, "huntsman_005_1", 20);
+        string food = Leave("Stash dog food in the ZB-016 bunker on Woods", DogFood, "huntsman_005_1", 20);
+        string water = Leave("Stash drinking water in the ZB-016 bunker on Woods", DrinkingWater, "huntsman_005_1", 20);
         Survive("Survive and extract from Woods", "Woods", food, water);
         Pay(8500, 50000, .06);
         GiveWeapon("59d6088586f774275f37482f");
@@ -399,7 +400,8 @@ public sealed class K9Quests(TemplateTable templates, TradersTable traders, Loca
 
     private string Leave(string description, string[] targets, string zone, int seconds)
     {
-        var fields = ItemFields(targets, 1, true);
+        // Not found in raid: the game doesn't check that for an item left at a place, so the task doesn't claim it.
+        var fields = ItemFields(targets, 1, false);
         fields["maxDurability"] = 0; fields["zoneId"] = zone; fields["plantTime"] = seconds;
         return Objective("LeaveItemAtLocation", description, fields);
     }

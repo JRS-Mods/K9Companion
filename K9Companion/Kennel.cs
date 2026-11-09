@@ -448,7 +448,7 @@ namespace K9Companion
         private static void Status(ImprovementView __instance)
         {
             var improvement = ImprovementField.GetValue(__instance) as Improvement;
-            if (Level(improvement) > 0 && improvement.Completed && __instance._status != null) __instance._status.text = "Built";
+            if (Level(improvement) > 0 && improvement.Completed && __instance._status != null) __instance._status.text = Lang.T("Built");
         }
 
         /// <summary>Every frame on the overview: while the kennel's screen is open, it shows nothing but the kennel.</summary>
@@ -474,7 +474,7 @@ namespace K9Companion
             }
             foreach (var panel in substrate.GetComponentsInChildren<ImprovementPanel>(true))
                 foreach (var text in panel.GetComponentsInChildren<TMP_Text>(true))
-                    if (text.GetComponentInParent<ImprovementView>() == null && text.text != "K9 KENNEL UPGRADES") text.text = "K9 KENNEL UPGRADES";
+                    if (text.GetComponentInParent<ImprovementView>() == null && text.text != Lang.T("K9 KENNEL UPGRADES")) text.text = Lang.T("K9 KENNEL UPGRADES");
         }
 
         private static void Shown(ImprovementView __instance, Improvement improvement)
@@ -503,8 +503,8 @@ namespace K9Companion
                 if (sample != null) text.font = sample.font;
                 text.fontSize = 15; text.enableWordWrapping = true; text.raycastTarget = false; text.alignment = TextAlignmentOptions.BottomLeft;
                 string locked = Locked(level, K9.SessionProfile);
-                text.text = $"<b>K9 KENNEL · LEVEL {level}: {K9.KennelNames[level - 1].ToUpperInvariant()}</b>\n<size=85%><color=#a8a69a>{Features[level - 1]}</color>" +
-                            (locked == null || improvement.Completed || improvement.Processing ? "" : $"  <color=#c9705f>· LOCKED: {locked}</color>") + "</size>";
+                text.text = $"<b>{Lang.T("K9 KENNEL")} · {Lang.T("LEVEL " + level)}: {Lang.T(K9.KennelNames[level - 1]).ToUpperInvariant()}</b>\n<size=85%><color=#a8a69a>{Lang.T(Features[level - 1])}</color>" +
+                            (locked == null || improvement.Completed || improvement.Processing ? "" : $"  <color=#c9705f>· {Lang.T("LOCKED")}: {Lang.T(locked)}</color>") + "</size>";
                 __instance.ButtonUpdate();
             }
             catch (Exception e) { Plugin.Log.LogWarning("K9 Kennel heading: " + e.Message); }
@@ -620,7 +620,7 @@ namespace K9Companion
         internal static void Dress(AreaPanel panel, int level)
         {
             if (panel == null) return;
-            if (panel.AreaName != null && panel.AreaName.text != "K9 KENNEL") panel.AreaName.text = "K9 KENNEL";
+            if (panel.AreaName != null && panel.AreaName.text != Lang.T("K9 KENNEL")) panel.AreaName.text = Lang.T("K9 KENNEL");
             AreaIcon icon = panel.AreaIconCreated;
             if (icon == null) return;
             // The paw in the game's own hex, as every area's symbol is.

@@ -200,10 +200,11 @@ public sealed class DrYang(TradersTable traders, LocaleTable locales, TraderConf
             [$"{Id} Location"] = "Tarkov veterinary clinic",
             [$"{Id} Description"] = "Before the conflict Dr. Yang ran the only veterinary clinic in Tarkov. He stayed for the animals that were left behind, and now keeps the city's working dogs fed, watered and patched up - for a fair price."
         };
-        foreach (var language in locales.Global.Values)
+        K9Lang.Note(text.Values);
+        foreach (var (code, language) in locales.Global)
             language.AddTransformer(data =>
             {
-                if (data != null) foreach (var (key, value) in text) data[key] = value;
+                if (data != null) foreach (var (key, value) in text) data[key] = K9Lang.T(code, value);
                 return data;
             });
     }

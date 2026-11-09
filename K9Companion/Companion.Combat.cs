@@ -441,6 +441,20 @@ namespace K9Companion
         private Player lastShooter;
         private float lastShotAt;
         private bool defending;
+        // Called off (Come here, Bring to me): no fights of its own picking for a while, so it stays with you while you're
+        // under fire. An order of yours (Over There) ends it.
+        private const float CallOffTime = 30;
+        private float calledOffUntil;
+        private bool CalledOff => Time.time < calledOffUntil;
+        private bool PicksFights => rules.AutoEngage && !CalledOff;
+
+        /// <summary>Drops any fight and keeps out of new ones of its own picking for <see cref="CallOffTime"/> seconds.</summary>
+        private void CallOff()
+        {
+            if (attackTarget != null || brain.State != CombatState.Idle) StopFight();
+            hunt = null;
+            calledOffUntil = Time.time + CallOffTime;
+        }
 
         // Every shot anyone fires (DogThreat.PatchGunfire).
         internal void ShotFired(Player shooter, Vector3 from, Vector3 direction)
@@ -522,12 +536,12 @@ namespace K9Companion
                 bool nearerFirst = under != null && found != null && found != under && DistanceTo(found) + NearerBy < DistanceTo(under);
                 if (under != null && !nearerFirst)
                 {
-                    if (rules.AutoEngage) { GoForShooter(under); return; }
+                    if (PicksFights) { GoForShooter(under); return; }
                     Alert(under, owner);
                 }
                 if (found == null) return;
                 // Passive: it only alerts you, and goes in when ordered (Over There).
-                if (!rules.AutoEngage) { Alert(found, owner); return; }
+                if (!PicksFights) { Alert(found, owner); return; }
                 Engage(found, false);
                 if (!stalking) audio?.Play("bark");
                 Say(Plugin.DogName.Value + (stalking ? " is stalking " : " goes for ") + found.Profile.Nickname + ".");
@@ -536,7 +550,7 @@ namespace K9Companion
             if (!rules.CanAttack || command != Command.Follow) { StopFight(); return; }
             // Someone else opens up on you while it's on its way back, or chasing something it picked itself: them first. Never
             // over an order of yours, nor when it's about to get its teeth into what it's after.
-            if (rules.AutoEngage && !Wounded && Time.time >= nextScan
+            if (PicksFights && !Wounded && Time.time >= nextScan
                 && (brain.State == CombatState.Return || (brain.State == CombatState.Chase && (!brain.Ordered || defending))))
             {
                 nextScan = Time.time + .5f;

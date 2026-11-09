@@ -664,7 +664,7 @@ namespace K9Companion
                 view = feed.AddComponent<RawImage>(); view.raycastTarget = false;
                 label = Label(frame, 13, TextAlignmentOptions.TopLeft);
                 signal = Label(frame, 22, TextAlignmentOptions.Center);
-                signal.text = "NO SIGNAL";
+                signal.text = Lang.T("NO SIGNAL");
             }
             view.texture = picture;
             // 16:9, a share of the screen's height (Dog camera > Size), where Dog camera > Position says (see Place).
@@ -695,9 +695,16 @@ namespace K9Companion
                     at = new Vector2(under.x, -under.y);
                     break;
             }
+            // Dog camera > Move right / Move down, then kept on the screen.
+            at += new Vector2(Plugin.DogCamNudgeX.Value * Screen.width, -Plugin.DogCamNudgeY.Value * Screen.height);
+            var frame = (RectTransform)view.transform.parent;
+            Vector2 size = frame.sizeDelta;
+            bool right = Plugin.DogCamPosition.Value == DogCamPlace.TopRight;
+            at.x = right ? Mathf.Clamp(at.x, size.x - Screen.width, 0) : Mathf.Clamp(at.x, 0, Screen.width - size.x);
+            at.y = Mathf.Clamp(at.y, size.y - Screen.height, 0);
             if (at == placedAt) return;
             placedAt = at;
-            ((RectTransform)view.transform.parent).anchoredPosition = at;
+            frame.anchoredPosition = at;
         }
 
         private static Transform Box(Transform parent, string name, Color colour)

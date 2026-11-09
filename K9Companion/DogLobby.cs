@@ -308,10 +308,10 @@ namespace K9Companion
             DogNeeds needs = NeedsStore.Current;
             string stays = K9.NotDeployable(!pmc);
             bool going = Plugin.Active.Value && stays == null;
-            takeLabel.text = "TAKE DOG: " + (Plugin.Active.Value ? "YES" : "NO");
+            takeLabel.text = Lang.T("TAKE DOG: " + (Plugin.Active.Value ? "YES" : "NO"));
             string state = needs == null ? "" : $"Health {Mathf.RoundToInt(needs.Health)}%   Hunger {Mathf.RoundToInt(needs.Hunger)}%   Thirst {Mathf.RoundToInt(needs.Thirst)}%\n";
             string note = stays != null ? "Stays home: " + stays + "." : !Plugin.Active.Value ? "Stays home this raid." : "Comes with you.";
-            status.text = state + (going ? "<color=#9fc29a>" : "<color=#d9a066>") + note + "</color>";
+            status.text = Lang.T(state) + (going ? "<color=#9fc29a>" : "<color=#d9a066>") + Lang.T(note) + "</color>";
         }
 
         private void Update()
@@ -520,7 +520,7 @@ namespace K9Companion
                 try { ItemUiContext.Instance.OpenItem(bag, new DefaultItemContext(bag, EItemViewType.InventoryDuringMatching)); }
                 catch (Exception e) { Plugin.Log.LogWarning("The dog's jacket couldn't be opened here: " + e.Message); }
             });
-            label.text = "OPEN JACKET";
+            label.text = Lang.T("OPEN JACKET");
             openJacket.interactable = jacket != null;
         }
     }
@@ -532,7 +532,7 @@ namespace K9Companion
         {
             var label = rect.gameObject.AddComponent<TextMeshProUGUI>();
             if (font != null) label.font = font;
-            label.text = text; label.fontSize = size; label.fontStyle = style; label.color = colour;
+            label.text = Lang.T(text); label.fontSize = size; label.fontStyle = style; label.color = colour;
             label.enableWordWrapping = true; label.raycastTarget = false; label.alignment = TextAlignmentOptions.TopLeft;
             return label;
         }

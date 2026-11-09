@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.3.0
+
+Needs SPT 4.1.x. Install over 1.2.x (both folders) and restart the SPT server; your dog, kennel, settings and quest progress carry over. With Fika, everyone needs this version, the host too (a headless host included).
+
+### Added
+
+- **Translations.** All of the mod's text can be translated without touching the code. Each half has a `lang` folder with an `en.json` listing every text: `BepInEx/plugins/K9Companion/lang` (messages, DOG tab, raid screens, dog camera, kennel, Y menu) and `SPT_Runtime/user/mods/K9Companion.Server/lang` (quests, items, Dr. Yang; the server rewrites this one when it starts). Copy each to `<language>.json` (`ru`, `fr`, `ge`, `es`...) and replace the English on the right. `{0}`, `{1}`... stand for names, numbers and other texts and stay in; anything left out stays in English. The client follows the game's language, or Display > Language (Advanced) in F12. F12's own settings stay in English.
+- **Dog camera > Move right / Move down.** Shift the feed from its position. At top right, Move down 0.06 clears the raid timer.
+
+### Changed
+
+- **Come here calls the dog off.** Come here (F8) and Bring to me (Shift+F8) used to only set the dog following, so a fight it was in went on, and in Defends you mode the next shot sent it back out. Now both end its fight, and for 30 seconds it starts none of its own. Over there still sends it in straight away.
+- **Trust Is Earned** no longer asks for found-in-raid food and water. The game never checked it for items left at a place.
+
+### Fixed
+
+- **The DOG tab could still vanish, or sit behind the back button at the top right,** with other mods' tabs on the bar (Weekend Drops Continued). It now looks for a free place on screen, clear of every tab and button, stays inside the screen, and goes left of OVERALL if the right of the bar is full.
+- **A pack of dog meat lying loose in a building showed a Tarker dried meat pack through it.** The game's room culling switched the hidden model back on whenever the room came into view; it now stays hidden.
+
 ## 1.2.2
 
 Needs SPT 4.1.x. Install over 1.2.1; nothing else changes. With Fika, everyone updates, as the version is the same throughout.

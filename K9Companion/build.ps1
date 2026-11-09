@@ -99,6 +99,16 @@ $soundFolder = Join-Path $root 'assets\sounds'
 $soundFiles = @()
 if (Test-Path $soundFolder) { $soundFiles = @(Get-ChildItem -LiteralPath $soundFolder -Filter '*.wav' -File) }
 foreach ($f in $files) { if (-not (Test-Path $f)) { throw "Missing $f" } }
+# Translations (Lang.cs, K9Lang.cs): the client's en.json template is made from the sources each build; the server's
+# writes itself when the server starts, and a copy is kept next to its project. Any <language>.json there ships too.
+$python = Get-Command python -ErrorAction SilentlyContinue
+$langScript = Join-Path $root 'tools\make_lang_template.py'
+if ($python -and (Test-Path $langScript)) { & $python.Source -I $langScript; if ($LASTEXITCODE -ne 0) { throw 'Making lang\en.json failed.' } }
+$langFiles = @()
+if (Test-Path (Join-Path $root 'lang')) { $langFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'lang') -Filter '*.json' -File) }
+$serverLangFolder = Join-Path (Split-Path $serverProject -Parent) 'lang'
+$serverLangFiles = @()
+if (Test-Path $serverLangFolder) { $serverLangFiles = @(Get-ChildItem -LiteralPath $serverLangFolder -Filter '*.json' -File) }
 
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 $dist = Join-Path $root 'dist'
@@ -116,6 +126,12 @@ try {
     [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $serverDll, "SPT_Runtime/user/mods/$serverName/$serverName.dll") | Out-Null
     [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $serverPortrait, "SPT_Runtime/user/mods/$serverName/res/dryang.jpg") | Out-Null
     [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, (Join-Path $root 'LICENSE.txt'), "SPT_Runtime/user/mods/$serverName/LICENSE.txt") | Out-Null
+    foreach ($l in $langFiles) {
+        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $l.FullName, "BepInEx/plugins/$name/lang/" + $l.Name) | Out-Null
+    }
+    foreach ($l in $serverLangFiles) {
+        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $l.FullName, "SPT_Runtime/user/mods/$serverName/lang/" + $l.Name) | Out-Null
+    }
     foreach ($picture in $questPictures) {
         [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $picture.FullName, "SPT_Runtime/user/mods/$serverName/res/quests/" + $picture.Name) | Out-Null
     }
@@ -161,6 +177,10 @@ if (-not $NoInstall) {
         Get-ChildItem -LiteralPath $soundDest -Filter '*.wav' -File | Where-Object { $soundFiles.Name -notcontains $_.Name } | Remove-Item
         Copy-Item -LiteralPath $soundFiles.FullName -Destination $soundDest -Force
     }
+    if ($langFiles.Count -gt 0) {
+        New-Item -ItemType Directory -Force (Join-Path $dest 'lang') | Out-Null
+        Copy-Item -LiteralPath $langFiles.FullName -Destination (Join-Path $dest 'lang') -Force
+    }
     Write-Host "Installed to $dest"
     $serverDest = Join-Path $SPTPath "SPT_Runtime\user\mods\$serverName"
     New-Item -ItemType Directory -Force $serverDest | Out-Null
@@ -177,6 +197,10 @@ if (-not $NoInstall) {
     if ($questPictures.Count -gt 0) {
         New-Item -ItemType Directory -Force (Join-Path $serverDest 'res\quests') | Out-Null
         Copy-Item -LiteralPath $questPictures.FullName -Destination (Join-Path $serverDest 'res\quests') -Force
+    }
+    if ($serverLangFiles.Count -gt 0) {
+        New-Item -ItemType Directory -Force (Join-Path $serverDest 'lang') | Out-Null
+        Copy-Item -LiteralPath $serverLangFiles.FullName -Destination (Join-Path $serverDest 'lang') -Force
     }
     Write-Host "Installed server mod to $serverDest (restart the SPT server)"
 }

@@ -237,7 +237,7 @@ namespace K9Companion
                 : Plugin.Aggressiveness == Aggression.Defensive ? $"Also goes for whoever shoots at you or it, up to {Plugin.DefendReach:0} m away, unasked."
                 : "Goes for every enemy it detects, and whoever shoots at you.";
             bool server = ServerRules.CombatMode != null || ServerRules.Aggression != null || ServerRules.Approach != null || ServerRules.SoloOnly != null;
-            behaviourLine.text = does + (server ? "  (Some of this is set by the server.)" : "");
+            behaviourLine.text = Lang.T(does) + (server ? "  " + Lang.T("(Some of this is set by the server.)") : "");
             approachLine.text = !Plugin.Combat ? ""
                 : Plugin.Approaching == DogApproach.Auto ? $"Straight at anything within {Plugin.AutoRush:0} m, and works its way in to anything further off."
                 : Plugin.Approaching == DogApproach.Stealth ? "Works its way in out of sight, then rushes the last few metres."
@@ -303,7 +303,7 @@ namespace K9Companion
             CompoundItem jacket = DogBag.FindInRaid(player);
             Panel("Jacket", new Vector2(RightX, -JacketTop), new Vector2(RightW, JacketBottom - JacketTop));
             jacketNote = Text("", 18, FontStyles.Normal, Ink, new Vector2(RightX + 10, -34), new Vector2(RightW - 20, 60));
-            if (jacket == null) { jacketNote.text = "No jacket this raid."; return; }
+            if (jacket == null) { jacketNote.text = Lang.T("No jacket this raid."); return; }
             (openJacket, _) = ButtonWithLabel("OPEN JACKET", new Vector2(RightX + 10, -100), () =>
             {
                 CompoundItem bag = DogBag.FindInRaid(GamePlayerOwner.MyPlayer);
@@ -333,13 +333,13 @@ namespace K9Companion
                 : inRaid && dog.IsDead ? "<color=#c9705f>Dead</color>"
                 : ConditionText(needs);
             string where = inRaid ? "in the raid with you" : K9.NotDeployable() is string stays ? "<color=#c9705f>" + stays + "</color>" : K9.Owned ? "<color=#9fc58a>ready to deploy</color>" : "";
-            if (headerLine != null) headerLine.text = "K9 dog  ·  " + state + (where.Length > 0 ? "  ·  " + where : "");
+            if (headerLine != null) headerLine.text = Lang.T("K9 dog  ·  " + state + (where.Length > 0 ? "  ·  " + where : ""));
             RefreshBehaviour();
             if (jacketNote != null && inRaid)
             {
                 CompoundItem jacket = DogBag.FindInRaid(GamePlayerOwner.MyPlayer);
                 bool near = dog != null && dog.DistanceTo(GamePlayerOwner.MyPlayer) <= 3f;
-                if (jacket != null) jacketNote.text = $"{jacket.LocalizedName()}: {jacket.GetAllItems().Count() - 1} item(s)." + (near ? "" : "\nStand next to the dog to open it.");
+                if (jacket != null) jacketNote.text = Lang.T($"{jacket.LocalizedName()}: {jacket.GetAllItems().Count() - 1} item(s).") + (near ? "" : "\n" + Lang.T("Stand next to the dog to open it."));
                 if (openJacket != null) openJacket.interactable = jacket != null && near;
             }
             RefreshKennel();
@@ -386,7 +386,7 @@ namespace K9Companion
             if (parent != null) rect.SetParent(parent, false);
             var label = rect.gameObject.AddComponent<TextMeshProUGUI>();
             if (font != null) label.font = font;
-            label.text = text; label.fontSize = size * s; label.fontStyle = style; label.color = colour;
+            label.text = Lang.T(text); label.fontSize = size * s; label.fontStyle = style; label.color = colour;
             label.enableWordWrapping = true; label.raycastTarget = false; label.alignment = TextAlignmentOptions.TopLeft;
             return label;
         }
@@ -407,7 +407,7 @@ namespace K9Companion
             var back = box.gameObject.AddComponent<Image>(); back.color = PanelColour; back.raycastTarget = false;
             RectTransform rule = Child("Rule", topLeft, new Vector2(size.x, 1));
             var line = rule.gameObject.AddComponent<Image>(); line.color = Rule; line.raycastTarget = false;
-            if (title != null) Text(title.ToUpperInvariant(), 13, FontStyles.Bold, Accent, topLeft + new Vector2(10, -5), new Vector2(size.x - 20, 18));
+            if (title != null) Text(Lang.T(title).ToUpperInvariant(), 13, FontStyles.Bold, Accent, topLeft + new Vector2(10, -5), new Vector2(size.x - 20, 18));
             return box;
         }
 
@@ -653,7 +653,7 @@ namespace K9Companion
             catch (Exception e) { Status("That didn't work."); Plugin.Log.LogError("DOG tab action failed: " + e); }
         }
 
-        private void Status(string text) { if (statusLine != null) statusLine.text = text; statusUntil = Time.unscaledTime + 8; }
+        private void Status(string text) { if (statusLine != null) statusLine.text = Lang.T(text); statusUntil = Time.unscaledTime + 8; }
         private float statusUntil;
 
         private string NeedsDog() => K9.Owned ? null : "you have no dog yet";
@@ -667,8 +667,8 @@ namespace K9Companion
             foreach (CareAction a in actions)
             {
                 string locked = AtHome || a.InRaid ? a.Locked() : "out of raids only";
-                a.Title.text = a.Text();
-                a.Detail.text = locked ?? a.Info();
+                a.Title.text = Lang.T(a.Text());
+                a.Detail.text = Lang.T(locked ?? a.Info());
                 a.Title.color = locked == null && !busy ? Ink : Soft;
                 a.Detail.color = locked == null ? Soft : new Color(.72f, .5f, .38f);
                 a.Button.interactable = locked == null && !busy;
@@ -676,16 +676,16 @@ namespace K9Companion
             if (statusLine != null && Time.unscaledTime > statusUntil) statusLine.text = "";
             RefreshArmour();
             int level = KennelLevel;
-            kennelLevel.text = level == 0 ? "NOT BUILT" : "LEVEL " + level + "  ·  " + K9.KennelNames[level - 1].ToUpperInvariant();
-            facts[0].text = $"+{K9.RecoveryPerHour(level, K9.Bed):0}% an hour";
-            facts[1].text = $"{K9.RestPace(level) * 100:0}% as fast";
-            facts[2].text = level >= 3 ? "kits go 50% further" : "none yet";
-            facts[3].text = BedNames[Mathf.Clamp(K9.Bed, 0, 2)];
-            facts[4].text = K9.Training + " of 3";
+            kennelLevel.text = level == 0 ? Lang.T("NOT BUILT") : Lang.T("LEVEL " + level) + "  ·  " + Lang.T(K9.KennelNames[level - 1]).ToUpperInvariant();
+            facts[0].text = Lang.T($"+{K9.RecoveryPerHour(level, K9.Bed):0}% an hour");
+            facts[1].text = Lang.T($"{K9.RestPace(level) * 100:0}% as fast");
+            facts[2].text = Lang.T(level >= 3 ? "kits go 50% further" : "none yet");
+            facts[3].text = Lang.T(BedNames[Mathf.Clamp(K9.Bed, 0, 2)]);
+            facts[4].text = Lang.T(K9.Training + " of 3");
             facts[5].text = (10 + 2 * Mathf.Clamp(K9.Training, 0, 3)) + " m";
             if (level >= 3) { kennelNext.text = ""; return; }
             string next = K9.KennelNames[level], building = Building(level + 1), held = KennelUi.Locked(level + 1, profile);
-            kennelNext.text = building != null ? $"Building the {next}: {building}" : held != null ? $"Next: {next}  ·  {held}" : $"Next: {next}  ·  ready to build in your Rest Space";
+            kennelNext.text = Lang.T(building != null ? $"Building the {next}: {building}" : held != null ? $"Next: {next}  ·  {held}" : $"Next: {next}  ·  ready to build in your Rest Space");
         }
 
         // What it wears, under the jacket's slot.
@@ -712,7 +712,7 @@ namespace K9Companion
                 else b.AppendLine("No armour").AppendLine("Full speed");
                 b.Append($"{jacket.GetAllItems().Count() - 1} items inside");
             }
-            armourLine.text = b.ToString();
+            armourLine.text = Lang.T(b.ToString());
             armourBar.Track.enabled = armourBar.Colour.enabled = wearLeft > 0;
             SetBar(armourBar, wearLeft, wearLeft < .25f ? Danger : wearLeft < .6f ? Caution : Good);
         }
@@ -1001,8 +1001,10 @@ namespace K9Companion
                 .FirstOrDefault(m => m.Name == nameof(InventoryScreen.Show) && m.GetParameters().Length == 10)
                 ?? throw new MissingMethodException(nameof(InventoryScreen), "Show(10 args)");
             // Last: other mods add their own tabs in the same place, and the DOG tab goes to the right of all of them.
+            // A finalizer rather than a postfix: it runs even if the screen or another mod's postfix throws, so the tab
+            // hidden at the start never stays hidden.
             harmony.Patch(show, prefix: new HarmonyMethod(typeof(DogTab), nameof(HideTab)) { priority = Priority.First },
-                postfix: new HarmonyMethod(typeof(DogTab), nameof(AddTab)) { priority = Priority.Last });
+                finalizer: new HarmonyMethod(typeof(DogTab), nameof(AddTab)) { priority = Priority.Last });
             // Leaving the screen (TRADERS, FLEA MARKET ... at the bottom) looks the selected tab up by its index among the
             // game's own tabs; the DOG tab isn't one of them, so that threw and the screen never closed.
             MethodInfo leave = AccessTools.Method(typeof(InventoryScreen.InventoryScreenController), "CloseAction")
@@ -1053,7 +1055,7 @@ namespace K9Companion
                     dog.name = DogTabName;
                     dog.gameObject.AddComponent<DogTabSpot>();
                     foreach (var localized in dog.GetComponentsInChildren<LocalizedText>(true)) localized.enabled = false;
-                    foreach (var label in dog.GetComponentsInChildren<TMPro.TMP_Text>(true)) label.text = "DOG";
+                    foreach (var label in dog.GetComponentsInChildren<TMPro.TMP_Text>(true)) label.text = Lang.T("DOG");
                 }
                 shownTab = dog;
                 dog.gameObject.SetActive(true);
@@ -1085,11 +1087,13 @@ namespace K9Companion
             if (step < 1) step = from.rect.width;
             to.anchorMin = from.anchorMin; to.anchorMax = from.anchorMax; to.pivot = from.pivot; to.sizeDelta = from.sizeDelta;
             // After the game's own tabs, never after another mod's: measured from those, it lands in the same place each time.
-            RectTransform own = tabs.Values.Where(t => t != null && t.transform.parent == bar && t.gameObject.activeSelf)
-                .Select(t => (RectTransform)t.transform).OrderByDescending(t => t.anchoredPosition.x).FirstOrDefault() ?? from;
+            var game = tabs.Values.Where(t => t != null && t.transform.parent == bar && t.gameObject.activeSelf)
+                .Select(t => (RectTransform)t.transform).OrderBy(t => t.anchoredPosition.x).ToList();
+            RectTransform own = game.LastOrDefault() ?? from;
             var spot = dog.GetComponent<DogTabSpot>() ?? dog.gameObject.AddComponent<DogTabSpot>();
             spot.Step = step;
             spot.After = own;
+            spot.First = game.FirstOrDefault() ?? from;
             spot.MoveToFree();
             Report(dog, $"at {to.anchoredPosition}, the first free place right of {own.name}");
         }
@@ -1156,40 +1160,102 @@ namespace K9Companion
     }
 
     /// <summary>
-    /// Keeps the DOG tab clear of tabs other mods put on the same bar, whenever they add them: it takes the first free
-    /// place right of the game's own tabs. Counted from those rather than from the rightmost tab, it never pushes another
-    /// mod's tab along, or gets pushed off the end of the bar by one.
+    /// Keeps the DOG tab clear of tabs other mods put on the same bar, whenever they add them, and of the screen's own
+    /// buttons (the back button at the top right): it takes the first free place right of the game's own tabs, and
+    /// left of OVERALL if the bar is full up to the edge of the screen. Free means on the screen and not overlapping any
+    /// other tab or button, measured on screen rather than by position numbers, since the back button and other mods'
+    /// tabs aren't anchored like the game's tabs.
     /// </summary>
     internal sealed class DogTabSpot : MonoBehaviour
     {
         internal float Step;
-        internal RectTransform After;
+        internal RectTransform After, First;
+        private float nextCheck;
+        private static readonly Vector3[] Corners = new Vector3[4];
 
-        private RectTransform OnTopOf(float x)
+        private static Rect WorldRect(RectTransform t)
         {
+            t.GetWorldCorners(Corners);
+            return Rect.MinMaxRect(Corners[0].x, Corners[0].y, Corners[2].x, Corners[2].y);
+        }
+
+        // The tab's own rect, a little in from its edges so neighbours that only touch it don't count.
+        private Rect Inner()
+        {
+            Rect mine = WorldRect((RectTransform)transform);
+            float dx = mine.width * .15f, dy = mine.height * .15f;
+            return Rect.MinMaxRect(mine.xMin + dx, mine.yMin + dy, mine.xMax - dx, mine.yMax - dy);
+        }
+
+        private bool Blocks(Transform other, Rect inner)
+        {
+            if (!(other is RectTransform rect) || other == transform || other.IsChildOf(transform) || transform.IsChildOf(other)) return false;
+            if (!other.gameObject.activeInHierarchy) return false;
+            Rect theirs = WorldRect(rect);
+            // Backgrounds, panels and scroll areas aren't in the way; only things about the size of a tab or a button.
+            if (theirs.width > inner.width * 4 || theirs.height > inner.height * 4 || theirs.width < 1 || theirs.height < 1) return false;
+            return theirs.Overlaps(inner);
+        }
+
+        /// <summary>The tab or button the DOG tab is on top of, or null.</summary>
+        internal Transform Blocker()
+        {
+            Rect inner = Inner();
             Transform bar = transform.parent;
             for (int i = 0; i < bar.childCount; i++)
-                if (bar.GetChild(i) is RectTransform other && other != transform && other.gameObject.activeSelf
-                    && Mathf.Abs(other.anchoredPosition.x - x) < Step * .5f) return other;
+                if (Blocks(bar.GetChild(i), inner)) return bar.GetChild(i);
+            Canvas canvas = GetComponentInParent<Canvas>();
+            Transform root = canvas != null ? canvas.rootCanvas.transform : null;
+            foreach (Selectable button in Selectable.allSelectablesArray)
+                if (button != null && (root == null || button.transform.IsChildOf(root)) && Blocks(button.transform, inner)) return button.transform;
             return null;
+        }
+
+        private bool OnScreen()
+        {
+            Canvas canvas = GetComponentInParent<Canvas>();
+            if (canvas == null) return true;
+            Rect screen = WorldRect((RectTransform)canvas.rootCanvas.transform), mine = WorldRect((RectTransform)transform);
+            float slack = mine.width * .05f;
+            return mine.xMin >= screen.xMin - slack && mine.xMax <= screen.xMax + slack && mine.yMin >= screen.yMin - slack && mine.yMax <= screen.yMax + slack;
+        }
+
+        private bool TryAt(float x, float y)
+        {
+            ((RectTransform)transform).anchoredPosition = new Vector2(x, y);
+            return OnScreen() && Blocker() == null;
         }
 
         internal void MoveToFree()
         {
-            if (Step < 1 || After == null) return;
-            var self = (RectTransform)transform;
-            float x = After.anchoredPosition.x + Step;
-            for (int i = 0; i < 32 && OnTopOf(x) != null; i++) x += Step;
-            self.anchoredPosition = new Vector2(x, After.anchoredPosition.y);
+            if (Step < 1 || After == null || transform.parent == null) return;
+            float y = After.anchoredPosition.y;
+            float right = After.anchoredPosition.x, left = (First != null ? First : After).anchoredPosition.x;
+            for (int i = 1; i <= 16; i++)
+            {
+                if (TryAt(right + i * Step, y)) return;
+                if (!OnScreen()) break;
+            }
+            for (int i = 1; i <= 4; i++)
+            {
+                if (TryAt(left - i * Step, y)) return;
+                if (!OnScreen()) break;
+            }
+            // Nowhere free: right after the game's tabs, where it always used to go.
+            ((RectTransform)transform).anchoredPosition = new Vector2(right + Step, y);
         }
 
         private void LateUpdate()
         {
-            if (Step < 1 || After == null) return;
-            RectTransform other = OnTopOf(((RectTransform)transform).anchoredPosition.x);
-            if (other == null) return;
+            if (Step < 1 || After == null || Time.unscaledTime < nextCheck) return;
+            nextCheck = Time.unscaledTime + .25f;
+            Transform other = Blocker();
+            if (other == null && OnScreen()) return;
+            Vector2 was = ((RectTransform)transform).anchoredPosition;
             MoveToFree();
-            Plugin.Log.LogInfo($"DOG tab moved to {((RectTransform)transform).anchoredPosition}: {other.name} was on top of it.");
+            Vector2 now = ((RectTransform)transform).anchoredPosition;
+            if (now != was)
+                Plugin.Log.LogInfo($"DOG tab moved to {now}: {(other != null ? other.name + " was on top of it" : "it was off the screen")}.");
         }
     }
 }

@@ -237,7 +237,7 @@ public sealed class K9Items(CustomItemService items, TemplateTable templates, Lo
         {
             ItemTplToClone = source, NewId = id, ParentId = original.Parent, NewItemName = name,
             HandbookParentId = HandbookCategory(source), HandbookPriceRoubles = price, FleaPriceRoubles = price,
-            Locales = new Dictionary<string, LocaleDetails> { ["en"] = text }
+            Locales = K9Lang.Locales(text)
         });
         if (!result.Success) logger.Error($"[K9Companion] Couldn't create {text.Name}: " + string.Join("; ", result.Errors ?? new List<string>()));
         return result.Success == true;
@@ -480,10 +480,15 @@ public sealed class GearItems(CustomItemService items, TemplateTable templates, 
         }
 
         // The slot's heading in the DOG tab.
-        foreach (var language in locales.Global.Values)
+        K9Lang.Note(new[] { "Jacket", "Head", "Camera", "Collar" });
+        foreach (var (code, language) in locales.Global)
             language.AddTransformer(data =>
             {
-                if (data != null) { data[DogGear.Slot] = "Jacket"; data[DogGear.HeadSlot] = "Head"; data[DogGear.CameraSlot] = "Camera"; data[DogGear.CollarSlot] = "Collar"; }
+                if (data != null)
+                {
+                    data[DogGear.Slot] = K9Lang.T(code, "Jacket"); data[DogGear.HeadSlot] = K9Lang.T(code, "Head");
+                    data[DogGear.CameraSlot] = K9Lang.T(code, "Camera"); data[DogGear.CollarSlot] = K9Lang.T(code, "Collar");
+                }
                 return data;
             });
         logger.Info($"[K9Companion] {DogGear.Jackets.Length} dog jackets and {DogGear.Kits.Length} pieces of head and camera gear registered.");
@@ -531,7 +536,7 @@ public sealed class GearItems(CustomItemService items, TemplateTable templates, 
         {
             ItemTplToClone = from ?? ItemCase, NewId = id, ParentId = parent, NewItemName = name,
             HandbookParentId = handbook, HandbookPriceRoubles = price, FleaPriceRoubles = price,
-            Locales = new Dictionary<string, LocaleDetails> { ["en"] = text }
+            Locales = K9Lang.Locales(text)
         });
         if (!result.Success) logger.Error($"[K9Companion] Couldn't create {name}: " + string.Join("; ", result.Errors ?? new List<string>()));
         return result.Success == true;

@@ -121,13 +121,15 @@ namespace K9Companion
                 : next == DogApproach.Stealth ? ": Stealth approach, working its way in out of sight." : ": Direct approach, straight at them."));
         }
 
-        // Same as the Recall key: drops any attack, ends sit/stay/lie, and follows again.
+        // Same as the Recall key: drops any attack, ends sit/stay/lie, and follows again. For the next 30 s it starts no
+        // fight of its own (Defending you or Any enemy), so you can get it back while you're under fire; Over There still works.
         private void Recall(Player owner, bool hideout)
         {
-            SetCommand(Command.Follow); audio.Play("whistle", true);
+            bool fighting = attackTarget != null || brain.State != CombatState.Idle;
+            SetCommand(Command.Follow); CallOff(); audio.Play("whistle", true);
             // In the hideout the dog walks over when it can find a way, and otherwise comes straight to you.
             if (hideout && !Reachable(owner.Transform.position) && FindPoint(owner.Transform.position, out Vector3 p)) Teleport(p, owner.Transform.position);
-            Say("Come here!");
+            Say(fighting ? $"Come here! {Plugin.DogName.Value} breaks off and stays with you for {CallOffTime:0} s." : "Come here!");
             K9.Report("come");
         }
 
@@ -140,6 +142,7 @@ namespace K9Companion
             Vector3 at = owner.Transform.position;
             if (!FindPoint(at, out Vector3 point, owner.LookDirection)) { Say("No room in front of you for " + Plugin.DogName.Value + "."); return; }
             SetCommand(Command.Follow);
+            CallOff();
             Teleport(point, at);
             audio?.Play("whistle", true);
             Say(Plugin.DogName.Value + " is here.");
@@ -192,6 +195,7 @@ namespace K9Companion
         // the ordered attack range; with nobody there, the dog runs to where you aim and hunts around it.
         private void OrderAttack(Player owner)
         {
+            calledOffUntil = 0;
             Player target = AimedEnemy(owner, out string problem, out Vector3? aimed);
             if (!rules.CanAttack) target = null;   // without combat mode: a "go there"
             Plugin.Log.LogInfo($"Over there: target {(target != null ? target.Profile.Nickname : "none")}, aimed at {(aimed.HasValue ? aimed.Value.ToString() : "nothing")}" + (target == null ? $" ({problem})" : "") + ".");
@@ -307,7 +311,7 @@ namespace K9Companion
             return null;
         }
 
-        internal void Say(string text) { message = text; messageUntil = Time.unscaledTime + 5; }
+        internal void Say(string text) { message = Lang.T(text); messageUntil = Time.unscaledTime + 5; }
         private void SetCommand(Command value)
         {
             command = value; actionClip = null; idle = 0; CancelTasks(); roaming = false; bedTrip = false;
@@ -1050,7 +1054,7 @@ namespace K9Companion
             string why = null;
             bool ok = dog != null && dog.Available(Orders[i], out why);
             if (dog == null) why = "no dog";
-            item._textField.text = ok ? caption : "<color=#7d7d7d>" + caption + "</color> <size=75%><color=#c9705f>" + why + "</color></size>";
+            item._textField.text = ok ? Lang.T(caption) : "<color=#7d7d7d>" + Lang.T(caption) + "</color> <size=75%><color=#c9705f>" + Lang.T(why) + "</color></size>";
         }
 
         private static bool BindName(int index, ref string __result)
