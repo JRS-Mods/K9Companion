@@ -7,7 +7,7 @@
     <Company>JRS</Company>
     <Copyright>Copyright © 2026 JRS</Copyright>
     <RootNamespace>K9Companion.Server</RootNamespace>
-    <Version>1.2.0</Version>
+    <Version>1.2.2</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>

@@ -19,7 +19,7 @@ namespace K9Companion
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id = "jrs.k9companion";
-        public const string Version = "1.2.0";
+        public const string Version = "1.2.2";
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> Active, CombatMode, SurvivalNeeds, AutoFeedInHideout, CarryOverInjuries;
         internal static ConfigEntry<DogApproach> ApproachMode;

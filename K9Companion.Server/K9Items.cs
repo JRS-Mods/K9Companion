@@ -97,9 +97,11 @@ public sealed class K9Items(CustomItemService items, TemplateTable templates, Lo
         }))
             DogMedKit(templates.Items[K9Ids.VetKit]);
 
-        // Measured on generated raids: vet kits in the crack house in about eight raids out of ten, and an insignia in the
-        // Dorms in about seven out of ten. (On Customs a spot's weight w comes up with a chance of about 1 - e^(-3.5 w).)
-        Place("bigmap", "crackhouse", CrackHouse, .07, (K9Ids.VetKit, 1));
+        // The crack house, where Dr. Yang's quest sends you for a vet kit, has spots of its own, each as likely to come up
+        // as a typical loose spot on Customs (the middle of the map's own odds): a kit there in about half of raids. It
+        // turns up wherever a Grizzly can as well (DogFoodInRaids). The insignia in the Dorms comes up in about seven raids
+        // out of ten. (On Customs a spot's weight w comes up with a chance of about 1 - e^(-3.5 w).)
+        Place("bigmap", "crackhouse", CrackHouse, .018, (K9Ids.VetKit, 1));
         Place("bigmap", "dorms", Dorms, .04, (K9Ids.K9Insignia, 1));
 
         // Dog supplies sold by loyalty level (DrYang): what each one does is the client's (DogNeeds, DogScreen.Kennel).
@@ -537,18 +539,39 @@ public sealed class GearItems(CustomItemService items, TemplateTable templates, 
 }
 
 /// <summary>
-/// Dog food in raids. Dr. Yang's quests take it found in raid only, so it turns up wherever its vanilla look-alike does,
-/// as often: the can wherever the can of beef stew is, the pack of meat wherever the dried beef is, in containers, lying
-/// loose and in scavs' pockets, vests and bags (BotQuestItemsPatch marks those found in raid, as scav loot isn't otherwise).
-/// A person can eat it too, and it does them little good: hardly any energy, and it leaves them thirsty.
+/// Dog food and the vet kit in raids, by the game's own loot tables rather than numbers of ours. Dr. Yang's quests take
+/// them found in raid only, so each joins every container and loose spot that can hold one of its vanilla look-alikes:
+/// <list type="bullet">
+/// <item>the can of dog food wherever a can of food can be (beef stew, peas, squash, fish), the pack of dog meat wherever
+/// dried meat or sausage can, at nearly twice the average of their odds there (so as common as the commonest food, Iskra
+/// rations and sugar: about two of each a raid on Customs, more on Woods and Interchange), and in scavs' pockets, vests
+/// and bags (BotQuestItemsPatch marks those found in raid, as scav loot isn't otherwise);</item>
+/// <item>the vet kit, a copy of the Grizzly, wherever a Grizzly can be, as often, on every map (scavs don't carry it).</item>
+/// </list>
+/// A person can eat the food too, and it does them little good: hardly any energy, and it leaves them thirsty.
 /// </summary>
 [Injectable(TypePriority = OnLoadOrder.Preload + 2)]
 public sealed class DogFoodInRaids(LocationTable locations, BotTable bots, TemplateTable templates, ISptLogger<DogFoodInRaids> logger) : IOnLoad
 {
-    private static readonly (MongoId Ours, MongoId Like)[] Pairs =
+    private static readonly MongoId[] Cans =
     {
-        (DogFoodItems.DogFood, new MongoId("57347d7224597744596b4e72")),   // can of beef stew (large)
-        (DogFoodItems.DogMeat, new MongoId("65815f0e647e3d7246384e14")),   // pack of dried beef
+        new("57347d7224597744596b4e72"), new("57347da92459774491567cf5"),   // beef stew, small and large
+        new("57347d692459774491567cf1"), new("57347d8724597744596b4e76"),   // green peas, squash spread
+        new("57347d9c245977448b40fa85"), new("57347d5f245977448b40fa81"),   // herring, humpback salmon
+        new("5673de654bdc2d180f8b456d"), new("5bc9c29cd4351e003562b8a3"),   // pacific saury, sprats
+    };
+
+    private static readonly MongoId[] Meat =
+    {
+        new("65815f0e647e3d7246384e14"), new("635a758bfefc88a93f021b8a"),   // Tarker dried meat, Salty Dog beef sausage
+    };
+
+    // Ours, what it goes in with, how its odds compare with theirs, and whether scavs carry it.
+    private static readonly (MongoId Ours, MongoId[] Like, double Scale, bool OnScavs)[] Families =
+    {
+        (DogFoodItems.DogFood, Cans, 1.8, true),
+        (DogFoodItems.DogMeat, Meat, 1.8, true),
+        (K9Ids.VetKit, new[] { new MongoId(K9Ids.Grizzly) }, 1.0, false),
     };
 
     public static bool IsDogFood(MongoId tpl) => tpl == DogFoodItems.DogFood || tpl == DogFoodItems.DogMeat;
@@ -560,6 +583,13 @@ public sealed class DogFoodInRaids(LocationTable locations, BotTable bots, Templ
     {
         (DogFoodItems.DogFood, 15, -20), (DogFoodItems.DogMeat, 10, -25), (K9Ids.PremiumFood, 20, -20), (K9Ids.Treats, 5, -10),
     };
+
+    // Its odds where it goes in with any of its look-alikes: the average of theirs there, scaled. Null if none are there.
+    private static double? OddsAmong(IEnumerable<(MongoId Tpl, double Odds)> there, MongoId[] like, double scale)
+    {
+        var theirs = there.Where(t => like.Contains(t.Tpl)).Select(t => t.Odds).ToList();
+        return theirs.Count == 0 ? null : theirs.Average() * scale;
+    }
 
     public Task OnLoadAsync(CancellationToken cancellationToken)
     {
@@ -588,11 +618,15 @@ public sealed class DogFoodInRaids(LocationTable locations, BotTable bots, Templ
             foreach (var pool in new[] { carried.Backpack, carried.Pockets, carried.TacticalVest })
             {
                 if (pool == null) continue;
-                foreach (var (ours, like) in Pairs)
-                    if (pool.TryGetValue(like, out double weight) && pool.TryAdd(ours, weight)) pools++;
+                foreach (var (ours, like, scale, onScavs) in Families)
+                {
+                    if (!onScavs || pool.ContainsKey(ours)) continue;
+                    double? odds = OddsAmong(pool.Select(p => (p.Key, p.Value)), like, scale);
+                    if (odds.HasValue && pool.TryAdd(ours, odds.Value)) pools++;
+                }
             }
         }
-        logger.Info($"[K9Companion] Dog food turns up in raids on {maps} maps and in {pools} scav loot pools, as often as the beef it copies.");
+        logger.Info($"[K9Companion] Dog food and the vet kit turn up in raids on {maps} maps as the game's own food and medkits do, and dog food in {pools} scav loot pools.");
         return Task.CompletedTask;
     }
 
@@ -604,11 +638,12 @@ public sealed class DogFoodInRaids(LocationTable locations, BotTable bots, Templ
             if (details.ItemDistribution == null) continue;
             var list = details.ItemDistribution.ToList();
             bool added = false;
-            foreach (var (ours, like) in Pairs)
+            foreach (var (ours, like, scale, _) in Families)
             {
-                ItemDistribution? source = list.FirstOrDefault(d => d.Tpl == like);
-                if (source == null || list.Any(d => d.Tpl == ours)) continue;
-                list.Add(new ItemDistribution { Tpl = ours, RelativeProbability = source.RelativeProbability });
+                if (list.Any(d => d.Tpl == ours)) continue;
+                double? odds = OddsAmong(list.Select(d => (d.Tpl, (double)(d.RelativeProbability ?? 0f))), like, scale);
+                if (!odds.HasValue) continue;
+                list.Add(new ItemDistribution { Tpl = ours, RelativeProbability = (float)odds.Value });
                 added = true;
             }
             if (added) details.ItemDistribution = list;
@@ -616,8 +651,8 @@ public sealed class DogFoodInRaids(LocationTable locations, BotTable bots, Templ
         return loot;
     }
 
-    // A loose spot lists the items it can be (each under a key) and the odds of each: ours joins every spot that can be its
-    // look-alike, at the same odds.
+    // A loose spot lists the items it can be (each under a key) and the odds of each: ours joins every spot that can be one
+    // of its look-alikes.
     private static LooseLoot? LyingLoose(LooseLoot? loot)
     {
         if (loot?.Spawnpoints == null) return loot;
@@ -626,16 +661,22 @@ public sealed class DogFoodInRaids(LocationTable locations, BotTable bots, Templ
             if (point.Template?.Items == null || point.ItemDistribution == null) continue;
             var items = point.Template.Items.ToList();
             var odds = point.ItemDistribution.ToList();
+            // What each key in this spot is: its item with no parent.
+            var keyed = new Dictionary<string, MongoId>();
+            foreach (var i in items)
+                if (string.IsNullOrEmpty(i.ParentId) && i.ComposedKey != null) keyed.TryAdd(i.ComposedKey, i.Template);
+            var there = new List<(MongoId, double)>();
+            foreach (var d in odds)
+                if (d.ComposedKey?.Key is { } k && keyed.TryGetValue(k, out MongoId tpl)) there.Add((tpl, (double)(d.RelativeProbability ?? 0)));
             bool added = false;
-            foreach (var (ours, like) in Pairs)
+            foreach (var (ours, like, scale, _) in Families)
             {
-                SptLootItem? source = items.FirstOrDefault(i => i.Template == like && string.IsNullOrEmpty(i.ParentId));
                 string key = ours.ToString();
-                if (source == null || items.Any(i => i.ComposedKey == key)) continue;
-                LooseLootItemDistribution? theirs = odds.FirstOrDefault(d => d.ComposedKey?.Key == source.ComposedKey);
-                if (theirs == null) continue;
+                if (items.Any(i => i.ComposedKey == key)) continue;
+                double? chance = OddsAmong(there, like, scale);
+                if (!chance.HasValue) continue;
                 items.Add(new SptLootItem { Id = new MongoId(), Template = ours, ComposedKey = key, Upd = new Upd { StackObjectsCount = 1 } });
-                odds.Add(new LooseLootItemDistribution { ComposedKey = new ComposedKey { Key = key }, RelativeProbability = theirs.RelativeProbability });
+                odds.Add(new LooseLootItemDistribution { ComposedKey = new ComposedKey { Key = key }, RelativeProbability = chance.Value });
                 added = true;
             }
             if (!added) continue;

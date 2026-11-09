@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.2.2
+
+Needs SPT 4.1.x. Install over 1.2.1; nothing else changes. With Fika, everyone updates, as the version is the same throughout.
+
+### Fixed
+
+- **The DOG tab no longer disappears with other mods' tabs on the bar** (Weekend Drops Continued's, say). Each time the character screen opened, the DOG tab and the other mod's tab each moved right of the other, until the DOG tab was off the edge of the screen. It now always takes the first free place after the game's own tabs.
+
+## 1.2.1
+
+Needs SPT 4.1.x. Install over 1.2.0 and restart the SPT server; your dog, kennel and quest progress carry over. Only the server's loot changes, but the version is the same throughout, so with Fika everyone updates.
+
+### Changed
+
+- **Dog food is easier to find.** A can of dog food now turns up wherever any can of food can (beef stew, green peas, squash spread, herring, salmon, saury, sprats), and a pack of dog meat wherever dried meat or a Salty Dog sausage can, instead of only alongside one item each. Each is now about as common as the commonest food in the game: around two cans and two packs a raid on Customs, more on Woods, Shoreline and Interchange, and scavs carry them too.
+- **The K9 veterinary kit is rarer in the crack house, and found elsewhere too.** It used to turn up in the crack house about twice a raid, far more often than any medkit. Now there's one there in about half of raids, and it turns up anywhere a Grizzly can, as often as a Grizzly does, on every map.
+
 ## 1.2.0
 
 Needs SPT 4.1.x. Install over 1.1.2 and restart the SPT server; your dog, kennel and quest progress carry over. With Fika, everyone needs this version, the host too (a headless host included).

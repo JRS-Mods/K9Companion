@@ -1001,7 +1001,8 @@ namespace K9Companion
                 .FirstOrDefault(m => m.Name == nameof(InventoryScreen.Show) && m.GetParameters().Length == 10)
                 ?? throw new MissingMethodException(nameof(InventoryScreen), "Show(10 args)");
             // Last: other mods add their own tabs in the same place, and the DOG tab goes to the right of all of them.
-            harmony.Patch(show, postfix: new HarmonyMethod(typeof(DogTab), nameof(AddTab)) { priority = Priority.Last });
+            harmony.Patch(show, prefix: new HarmonyMethod(typeof(DogTab), nameof(HideTab)) { priority = Priority.First },
+                postfix: new HarmonyMethod(typeof(DogTab), nameof(AddTab)) { priority = Priority.Last });
             // Leaving the screen (TRADERS, FLEA MARKET ... at the bottom) looks the selected tab up by its index among the
             // game's own tabs; the DOG tab isn't one of them, so that threw and the screen never closed.
             MethodInfo leave = AccessTools.Method(typeof(InventoryScreen.InventoryScreenController), "CloseAction")
@@ -1027,6 +1028,14 @@ namespace K9Companion
         }
 
         private const string DogTabName = "K9 DOG tab";
+        private static Tab shownTab;
+
+        // Out of sight while other mods place their tabs, which they put right of the rightmost they see: with the DOG
+        // tab there each time, theirs and ours would keep stepping past each other, a place further right every opening.
+        private static void HideTab()
+        {
+            if (shownTab != null) shownTab.gameObject.SetActive(false);
+        }
 
         private static void AddTab(InventoryScreen __instance)
         {
@@ -1046,8 +1055,9 @@ namespace K9Companion
                     foreach (var localized in dog.GetComponentsInChildren<LocalizedText>(true)) localized.enabled = false;
                     foreach (var label in dog.GetComponentsInChildren<TMPro.TMP_Text>(true)) label.text = "DOG";
                 }
-                Place(dog, template, tabs);
+                shownTab = dog;
                 dog.gameObject.SetActive(true);
+                Place(dog, template, tabs);
                 dog.SetInteractable(true);
                 dog.UpdateVisual(selected: false);
                 dog.Init(new DogTabController(__instance, gear));
@@ -1074,11 +1084,14 @@ namespace K9Companion
             float step = before != null ? Mathf.Abs(from.anchoredPosition.x - ((RectTransform)before.transform).anchoredPosition.x) : 0;
             if (step < 1) step = from.rect.width;
             to.anchorMin = from.anchorMin; to.anchorMax = from.anchorMax; to.pivot = from.pivot; to.sizeDelta = from.sizeDelta;
+            // After the game's own tabs, never after another mod's: measured from those, it lands in the same place each time.
+            RectTransform own = tabs.Values.Where(t => t != null && t.transform.parent == bar && t.gameObject.activeSelf)
+                .Select(t => (RectTransform)t.transform).OrderByDescending(t => t.anchoredPosition.x).FirstOrDefault() ?? from;
             var spot = dog.GetComponent<DogTabSpot>() ?? dog.gameObject.AddComponent<DogTabSpot>();
             spot.Step = step;
-            RectTransform last = spot.Rightmost(from);
-            to.anchoredPosition = new Vector2(last.anchoredPosition.x + step, from.anchoredPosition.y);
-            Report(dog, $"at {to.anchoredPosition}, {step:0} right of {last.name}");
+            spot.After = own;
+            spot.MoveToFree();
+            Report(dog, $"at {to.anchoredPosition}, the first free place right of {own.name}");
         }
 
         private static bool reported;
@@ -1143,37 +1156,40 @@ namespace K9Companion
     }
 
     /// <summary>
-    /// Keeps the DOG tab clear of tabs other mods put on the same bar, whenever they add them: if one lands on it, the
-    /// DOG tab steps right of the rightmost. It only moves on an overlap, so it can't chase another mod's tab around.
+    /// Keeps the DOG tab clear of tabs other mods put on the same bar, whenever they add them: it takes the first free
+    /// place right of the game's own tabs. Counted from those rather than from the rightmost tab, it never pushes another
+    /// mod's tab along, or gets pushed off the end of the bar by one.
     /// </summary>
     internal sealed class DogTabSpot : MonoBehaviour
     {
         internal float Step;
+        internal RectTransform After;
 
-        internal RectTransform Rightmost(RectTransform fallback)
+        private RectTransform OnTopOf(float x)
         {
-            RectTransform best = fallback;
             Transform bar = transform.parent;
             for (int i = 0; i < bar.childCount; i++)
                 if (bar.GetChild(i) is RectTransform other && other != transform && other.gameObject.activeSelf
-                    && other.anchoredPosition.x > best.anchoredPosition.x) best = other;
-            return best;
+                    && Mathf.Abs(other.anchoredPosition.x - x) < Step * .5f) return other;
+            return null;
+        }
+
+        internal void MoveToFree()
+        {
+            if (Step < 1 || After == null) return;
+            var self = (RectTransform)transform;
+            float x = After.anchoredPosition.x + Step;
+            for (int i = 0; i < 32 && OnTopOf(x) != null; i++) x += Step;
+            self.anchoredPosition = new Vector2(x, After.anchoredPosition.y);
         }
 
         private void LateUpdate()
         {
-            if (Step < 1) return;
-            var self = (RectTransform)transform;
-            Transform bar = self.parent;
-            for (int i = 0; i < bar.childCount; i++)
-            {
-                if (!(bar.GetChild(i) is RectTransform other) || other == self || !other.gameObject.activeSelf) continue;
-                if (Mathf.Abs(other.anchoredPosition.x - self.anchoredPosition.x) >= Step * .5f) continue;
-                RectTransform last = Rightmost(self);
-                self.anchoredPosition = new Vector2(last.anchoredPosition.x + Step, self.anchoredPosition.y);
-                Plugin.Log.LogInfo($"DOG tab moved right of {last.name}: {other.name} was on top of it.");
-                return;
-            }
+            if (Step < 1 || After == null) return;
+            RectTransform other = OnTopOf(((RectTransform)transform).anchoredPosition.x);
+            if (other == null) return;
+            MoveToFree();
+            Plugin.Log.LogInfo($"DOG tab moved to {((RectTransform)transform).anchoredPosition}: {other.name} was on top of it.");
         }
     }
 }
