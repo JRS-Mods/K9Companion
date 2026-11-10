@@ -80,6 +80,7 @@ namespace K9Companion
         internal Companion Dog;
         private GameObject overlay;
         private RectTransform frame, fill;
+        private CanvasGroup group;
         private Image fillImage;
         private TextMeshProUGUI nameLabel, valueLabel;
         private string shownName, shownValue;
@@ -95,11 +96,12 @@ namespace K9Companion
                 Camera view = CameraManager.Instance?.Camera;
                 bool show = Plugin.HealthBar.Value && Dog != null && Dog.CanBeHurt && owner != null && owner.HealthController != null
                             && owner.HealthController.IsAlive && !owner.IsInventoryOpened && view != null;
+                bool onHud = Plugin.HealthBarAt.Value == HealthBarPlace.UnderYourHealth;
                 // Through the viewport, so it lands right whatever the game renders at (resolution scaling, upscalers).
-                Vector3 viewport = show ? view.WorldToViewportPoint(Dog.OverheadPoint) : Vector3.zero;
+                Vector3 viewport = show && !onHud ? view.WorldToViewportPoint(Dog.OverheadPoint) : Vector3.zero;
                 Vector3 screen = new Vector3(viewport.x * Screen.width, viewport.y * Screen.height, viewport.z);
                 // Behind you: nowhere to draw it.
-                if (screen.z <= 0) show = false;
+                if (!onHud && screen.z <= 0) show = false;
                 if (!show)
                 {
                     if (overlay != null && overlay.activeSelf) overlay.SetActive(false);
@@ -108,8 +110,8 @@ namespace K9Companion
                 Build();
                 if (!overlay.activeSelf) overlay.SetActive(true);
 
-                // Full size up close, down to 60% at 100 m and beyond.
-                float size = Screen.height / 1080f * Mathf.Lerp(1f, .6f, Mathf.InverseLerp(5, 100, screen.z));
+                // Over the dog: full size up close, down to 60% at 100 m and beyond. On the HUD: a little larger, always.
+                float size = Screen.height / 1080f * (onHud ? 1.15f : Mathf.Lerp(1f, .6f, Mathf.InverseLerp(5, 100, screen.z)));
                 if (Mathf.Abs(size - shownSize) > .01f)
                 {
                     shownSize = size;
@@ -119,7 +121,16 @@ namespace K9Companion
                     track.sizeDelta = new Vector2(-10, 5) * size;
                     track.anchoredPosition = new Vector2(0, 4) * size;
                 }
-                frame.anchoredPosition = new Vector2(Mathf.Round(screen.x), Mathf.Round(screen.y));
+                if (onHud)
+                {
+                    frame.anchoredPosition = HudSpot(frame.sizeDelta);
+                    group.alpha = 1;
+                }
+                else
+                {
+                    frame.anchoredPosition = new Vector2(Mathf.Round(screen.x), Mathf.Round(screen.y));
+                    group.alpha = Plugin.HealthBarFade.Value ? Fade(frame, owner) : 1;
+                }
 
                 float max = Mathf.Max(1, Dog.HealthMax);
                 float share = Dog.IsDead ? 0 : Mathf.Clamp01(Dog.HealthNow / max);
@@ -142,6 +153,31 @@ namespace K9Companion
             }
         }
 
+        // On the HUD: top left under your health figure, the bar's top edge there (pivot is its bottom centre, in pixels
+        // from the bottom left). With the dog camera in the same place, it goes under the feed.
+        private static Vector2 HudSpot(Vector2 bar)
+        {
+            Vector2 under = HudLayout.UnderHealth;
+            float left = under.x, top = Screen.height - under.y;
+            if (DogCam.FeedOnScreen(out Rect feed) && feed.xMin < left + bar.x && feed.xMax > left && feed.yMin < top + 1)
+                top = Mathf.Min(top, feed.yMin - HudLayout.Gap);
+            return new Vector2(Mathf.Round(left + bar.x / 2), Mathf.Round(top - bar.y));
+        }
+
+        // Over the dog: how see-through the bar is by how near it is to the middle of the screen (where you aim), like
+        // Fika's pings. It's gone when it's on the crosshair, and fades from further out while you aim down sights.
+        private static float Fade(RectTransform bar, EFT.Player owner)
+        {
+            bool aiming = false;
+            try { aiming = owner.ProceduralWeaponAnimation != null && owner.ProceduralWeaponAnimation.IsAiming; }
+            catch (Exception) { }
+            // The bar's middle: its pivot is the bottom centre.
+            Vector2 middle = bar.anchoredPosition + new Vector2(0, bar.sizeDelta.y / 2);
+            float off = (middle - new Vector2(Screen.width / 2f, Screen.height / 2f)).magnitude / Screen.height;
+            float clear = aiming ? .08f : .04f, full = aiming ? .3f : .16f;
+            return Mathf.Lerp(aiming ? 0f : .12f, 1f, Mathf.InverseLerp(clear, full, off));
+        }
+
         private static string Clock(float seconds)
         {
             int s = Mathf.CeilToInt(seconds);
@@ -157,6 +193,7 @@ namespace K9Companion
             // Under the dog camera's feed and the game's own screens (sorting 30 and up).
             canvas.renderMode = RenderMode.ScreenSpaceOverlay; canvas.sortingOrder = 25;
             frame = Box(overlay.transform, "Frame", new Color(0, 0, 0, .5f));
+            group = frame.gameObject.AddComponent<CanvasGroup>(); group.blocksRaycasts = false; group.interactable = false;
             // Placed in screen pixels from the bottom left, centred over the dog's head.
             frame.anchorMin = frame.anchorMax = Vector2.zero; frame.pivot = new Vector2(.5f, 0);
             nameLabel = Label(frame, TextAlignmentOptions.TopLeft);

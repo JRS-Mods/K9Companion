@@ -28,6 +28,10 @@ Dr. Yang's trader ID, for other mods' configs: `6a5d0c0c4fb9a3c5e1d0d0a0`.
 | `K9Companion.Server` | The SPT server mod: Dr. Yang, the items, the questline, the kennel levels and the dog's saved data. |
 | `K9Companion.Fika` | The Fika link, loaded only when Fika is installed. |
 
+## Credits
+
+- Russian translation: [Praxideke](https://github.com/Praxideke)
+
 ## Licence
 
 The code is MIT (LICENSE.txt). The dog's model, animations, textures, sounds and the item models are licensed assets

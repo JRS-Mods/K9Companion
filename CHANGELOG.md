@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.1
+
+Needs SPT 4.1.x. Install over 1.3.0. With Fika, everyone updates, as the version is the same throughout.
+
+### Fixed
+
+- **The K9 Kennel can be built alongside Hideout We Deserve - UI Improvements.** With its "open the station menu without zooming" setting on, clicking the kennel's paw opened the plain Rest Space screen, which doesn't list the kennel's levels. The paw now always opens the kennel.
+
+### Added
+
+- **Russian translation**, by Praxideke: the whole mod (messages, DOG tab, raid screens, kennel, Y menu, quests, items, Dr. Yang). It's used automatically when the game is in Russian.
+- **Display > Dog health bar position:** over the dog (as before), or in one place on your HUD, under your health figure (and under the dog camera if that's there too).
+- **Display > Fade health bar near your crosshair** (on by default): over the dog, the bar fades out as it nears the middle of the screen, and from further out while you aim down sights, so it never covers what the dog's fighting.
+
 ## 1.3.0
 
 Needs SPT 4.1.x. Install over 1.2.x (both folders) and restart the SPT server; your dog, kennel, settings and quest progress carry over. With Fika, everyone needs this version, the host too (a headless host included).

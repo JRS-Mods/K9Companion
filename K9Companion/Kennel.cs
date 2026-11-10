@@ -427,12 +427,21 @@ namespace K9Companion
 
         private static bool reported;
 
-        private static void Selecting()
+        // The frame the kennel's screen was last opened in.
+        private static int openedFrame = -1;
+
+        private static bool Selecting()
         {
+            // Another mod opening the Rest Space from the same click (Hideout We Deserve's "open the station menu without
+            // zooming" does, from its own click handler): selecting the area that's just been shown again would close it
+            // (the game toggles), and showing it as the Rest Space would lose the kennel's levels. The kennel's screen stays.
+            if (!opening && openedFrame == Time.frameCount) return false;
+            if (opening) openedFrame = Time.frameCount;
             KennelView = opening; opening = false; reported = false;
             // Whatever the kennel's screen hid comes back for the next area shown.
             foreach (var part in hiddenParts) if (part != null) part.SetActive(true);
             hiddenParts.Clear();
+            return true;
         }
 
         private static void Hide(GameObject part)
@@ -534,6 +543,23 @@ namespace K9Companion
         {
             harmony.Patch(AccessTools.Method(typeof(AreaPanel), nameof(AreaPanel.PointerEnterHandler)), prefix: new HarmonyMethod(typeof(KennelIcon), nameof(Entered)));
             harmony.Patch(AccessTools.Method(typeof(AreaPanel), nameof(AreaPanel.PointerExitHandler)), prefix: new HarmonyMethod(typeof(KennelIcon), nameof(Left)));
+            // First: other mods take over area clicks (Hideout We Deserve opens the clicked area's screen itself and skips
+            // the game's handler), which for the paw would open the Rest Space rather than the kennel.
+            harmony.Patch(AccessTools.Method(typeof(AreaWorldPanel), nameof(AreaWorldPanel.OnPointerClick)),
+                prefix: new HarmonyMethod(typeof(KennelIcon), nameof(Clicked)) { priority = Priority.First });
+        }
+
+        private static bool Clicked(AreaWorldPanel __instance, UnityEngine.EventSystems.PointerEventData eventData)
+        {
+            if (!Ours(__instance)) return true;
+            try
+            {
+                if (eventData != null && eventData.button == UnityEngine.EventSystems.PointerEventData.InputButton.Left
+                    && screen != null && !screen.FirstPerson && __instance.Data != null)
+                    KennelUi.OpenKennel(screen._hideoutScreenOverlay, __instance.Data);
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("K9 Kennel icon click: " + e.Message); }
+            return false;
         }
 
         // Hovering the paw outlines the kennel (the way hovering an area outlines that area), never the Rest Space.

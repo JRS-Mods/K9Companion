@@ -8,7 +8,7 @@
     <Copyright>Copyright © 2026 JRS</Copyright>
     <RootNamespace>K9Companion</RootNamespace>
     <LangVersion>latest</LangVersion>
-    <Version>1.3.0</Version>
+    <Version>1.3.1</Version>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <DebugType>none</DebugType>
     <SPTPath Condition="'$(SPTPath)' == ''">F:\SPT</SPTPath>

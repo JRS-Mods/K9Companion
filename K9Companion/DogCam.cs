@@ -31,6 +31,19 @@ namespace K9Companion
         private GameObject overlay;
         private RawImage view;
         private TextMeshProUGUI label, signal;
+        // The feed's frame, for the health bar's place on the HUD (DogHud): it goes under the feed when both share a spot.
+        private static RectTransform shownFrame;
+        private static readonly Vector3[] feedCorners = new Vector3[4];
+
+        /// <summary>The feed's rectangle on screen in pixels from the bottom left, while it's showing.</summary>
+        internal static bool FeedOnScreen(out Rect rect)
+        {
+            rect = default;
+            if (shownFrame == null || !shownFrame.gameObject.activeInHierarchy) return false;
+            shownFrame.GetWorldCorners(feedCorners);
+            rect = Rect.MinMaxRect(feedCorners[0].x, feedCorners[0].y, feedCorners[2].x, feedCorners[2].y);
+            return true;
+        }
         private Transform mount;
         private float nextRender, shownSize = -1;
         private int shownResolution = -1, labelMetres = -1;
@@ -659,6 +672,7 @@ namespace K9Companion
                 var canvas = overlay.AddComponent<Canvas>();
                 canvas.renderMode = RenderMode.ScreenSpaceOverlay; canvas.sortingOrder = 30;
                 var frame = Box(overlay.transform, "Frame", new Color(0, 0, 0, .85f));
+                shownFrame = frame as RectTransform;
                 var feed = new GameObject("Feed", typeof(RectTransform));
                 feed.transform.SetParent(frame, false);
                 view = feed.AddComponent<RawImage>(); view.raycastTarget = false;

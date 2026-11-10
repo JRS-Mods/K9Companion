@@ -19,7 +19,7 @@ namespace K9Companion
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id = "jrs.k9companion";
-        public const string Version = "1.3.0";
+        public const string Version = "1.3.1";
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> Active, CombatMode, SurvivalNeeds, AutoFeedInHideout, CarryOverInjuries;
         internal static ConfigEntry<DogApproach> ApproachMode;
@@ -42,7 +42,8 @@ namespace K9Companion
         internal static ConfigEntry<float> Volume, BreathingVolume;
         internal static ConfigEntry<KeyboardShortcut> Stay, Lie, Rename, Pet, Feed, Water, DogCamKey;
         internal static ConfigEntry<bool> DogCamShow;
-        internal static ConfigEntry<bool> SoloRaidsOnly, DownedInsteadOfKilled, HealthBar;
+        internal static ConfigEntry<bool> SoloRaidsOnly, DownedInsteadOfKilled, HealthBar, HealthBarFade;
+        internal static ConfigEntry<HealthBarPlace> HealthBarAt;
         internal static ConfigEntry<KeyboardShortcut> Bring;
         internal static ConfigEntry<float> BleedOutTime, CarryLimit;
         internal static ConfigEntry<float> DogCamSize;
@@ -147,6 +148,12 @@ namespace K9Companion
                 "Also in the DOG commands of the Y menu.", KeyCode.LeftShift);
             HealthBar = Config.Bind("Display", "Dog health bar", true,
                 "In raids with combat mode on, the dog's name and health floating over its head, seen through walls.");
+            HealthBarAt = Config.Bind("Display", "Dog health bar position", HealthBarPlace.OverTheDog,
+                "Over the dog: floating over its head, seen through walls. Under your health: in one place on your HUD, top left " +
+                "under your health figure (under the dog camera if that's there too).");
+            HealthBarFade = Config.Bind("Display", "Fade health bar near your crosshair", true,
+                "Over the dog: the bar fades out as it nears the middle of the screen, and further out while you aim down sights, " +
+                "so it never covers what the dog's fighting.");
             Hideout = Config.Bind("Hideout", "Enabled", true, "Spawn in the hideout as well as raids.");
             Roam = Config.Bind("Hideout", "Wander when bored", true, Adv("After resting a while the dog gets up, wanders round the hideout, comes to say hello, then goes back to its bed."));
             DogName = Config.Bind("Appearance", "Name", "K9", Adv("Name on the collar tag and command display."));            Sounds = Config.Bind("Audio", "Enabled", true, "Play companion sounds and recall whistle locally.");
@@ -374,6 +381,8 @@ namespace K9Companion
 
     // UnderHealth was NextToHealth before 1.2.0 (beside the health figure, over the status effects); an old setting reads as the default.
     internal enum DogCamPlace { UnderHealth, TopLeft, TopRight }
+
+    internal enum HealthBarPlace { OverTheDog, UnderYourHealth }
 
     internal enum DogOrder { OverThere, ComeHere, Sit, LieDown, OpenBag, Feed, Water, GoToBed, Stay, Follow, Search, FetchMeds, FetchFood, AttackMode, ApproachMode, BringHere }
 
