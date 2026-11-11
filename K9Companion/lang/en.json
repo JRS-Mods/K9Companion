@@ -372,12 +372,14 @@
   "{0} is too badly hurt to deploy ({1}": "{0} is too badly hurt to deploy ({1}",
   "Armour locker, jacket repairs, 2 equipment presets, better rest": "Armour locker, jacket repairs, 2 equipment presets, better rest",
   "Bed.": "Bed.",
+  "BUILD": "BUILD",
   "Build the K9 Kennel first: then it can be moved.": "Build the K9 Kennel first: then it can be moved.",
   "Build the {0}": "Build the {0}",
   "Built": "Built",
   "Complete Dr. Yang's quest Trust Is Earned": "Complete Dr. Yang's quest Trust Is Earned",
   "Dog bed and bowls, food and water, the dog's health and condition, deployment": "Dog bed and bowls, food and water, the dog's health and condition, deployment",
   "furniture in the way": "furniture in the way",
+  "hh\\:mm\\:ss": "hh\\:mm\\:ss",
   "K9 KENNEL": "K9 KENNEL",
   "K9 Kennel": "K9 Kennel",
   "K9 Kennel icon": "K9 Kennel icon",
@@ -391,7 +393,8 @@
   "no room in front": "no room in front",
   "Requires Dr. Yang loyalty level {0}": "Requires Dr. Yang loyalty level {0}",
   "The bed is in the hideout.": "The bed is in the hideout.",
+  "Under construction": "Under construction",
   "uneven floor": "uneven floor",
   "uneven floor for the kennel's furniture": "uneven floor for the kennel's furniture",
-  "Veterinary station (+50% healing), 4 presets, faster recovery, cosmetics, premium storage": "Veterinary station (+50% healing), 4 presets, faster recovery, cosmetics, premium storage"
+  "Veterinary station (+50% healing), 4 presets, faster recovery, military kennel": "Veterinary station (+50% healing), 4 presets, faster recovery, military kennel"
 }

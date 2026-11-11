@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.2
+
+Needs SPT 4.1.x. Install over 1.3.1. With Fika, everyone updates, as the version is the same throughout.
+
+### Fixed
+
+- **No paw icon, so no way to build the K9 Kennel, on the hideout overview.** Before the kennel's first level, the paw stands over the dog, and with no kennel yet and the room behind the emergency wall still closed, the dog started where your character was. On the overview your character is put away off the floor, so the dog (and the paw) didn't appear until you'd walked around the hideout once. The dog now starts by the Rest Space's pet bed.
+- **The Rest Space screen showed an empty list headed "Mop the floor:"** (the game's unused placeholder text for improvements), left over from the kennel's levels, which are built from the kennel's own screen (the paw icon on the hideout overview, or K9 KENNEL in the bar along the bottom). That list is now hidden.
+- **The kennel built out in the void, outside the hideout.** When no room had space for it, the kennel went next to your character, and on the overview your character is put away outside the hideout. It now goes by the Rest Space's pet bed instead, and a kennel already saved out there is brought back in the next time you open the hideout (one you moved by hand with Hideout Extensions stays where you put it).
+- **The dog stopped at the door of some upstairs rooms in raids** (Tarbank, the grenade launcher room), and "Bring dog to me" there said "No room in front of you". The dog walks on the bots' navmesh, which doesn't cover every floor you can stand on. Where it runs out, the dog now crosses the floor itself, up and down stairs, when you're within 20 m, and "Bring dog to me" puts it on the floor beside you.
+- **The DOG tab under the BACK button in a window or at a lower resolution**, worst with other mods' tabs on the bar (Weekend Drops Continued's DROPS). With no free place left, the bar's tabs are now made a little narrower (down to 80%) so the DOG tab fits; at full size they go back to normal.
+- The Tactical K9 Facility (kennel level 3) listed "cosmetics, premium storage", which it never had. It now lists what it adds: the military kennel.
+- The kennel's build buttons said "Mop the floor" and a level being built said "The floor is being mopped" (more of the same placeholder text). They now say BUILD and "Under construction (time left)".
+
 ## 1.3.1
 
 Needs SPT 4.1.x. Install over 1.3.0. With Fika, everyone updates, as the version is the same throughout.

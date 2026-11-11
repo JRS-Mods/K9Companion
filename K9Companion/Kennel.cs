@@ -58,6 +58,13 @@ namespace K9Companion
                 Plugin.Log.LogInfo("The saved kennel spot is outside the kennel's room; moving it there.");
                 needs.HomeSet = false;
             }
+            // A spot saved outside the hideout (1.3.1 and earlier could put the kennel where your character is parked on
+            // the overview, out in the void) is forgotten, unless it was put there by hand.
+            if (needs != null && needs.HomeSet && !needs.HomeByHand && !InsideHideout(new Vector3(needs.HomeX, needs.HomeY, needs.HomeZ)))
+            {
+                Plugin.Log.LogInfo("The saved kennel spot is outside the hideout; finding a new one.");
+                needs.HomeSet = false;
+            }
             if (needs != null && needs.HomeSet)
             {
                 at = new Vector3(needs.HomeX, needs.HomeY, needs.HomeZ); facing = Quaternion.Euler(0, needs.HomeYaw, 0);
@@ -65,8 +72,15 @@ namespace K9Companion
                 if (!placed) Plugin.Log.LogInfo($"The saved kennel spot isn't clear any more ({why}); finding a new one.");
             }
             if (!placed) placed = AreaSpot(out at, out facing);
-            if (!placed && owner != null && ClearSpotNear(owner.Transform.position, owner.Transform.position.y, 5f, owner.Transform.position, out at, out facing))
+            // Next to you only while you walk round the hideout: on the overview your character is switched off and parked
+            // outside it, and the kennel went there, into the void.
+            if (!placed && owner != null && hideoutOwner.gameObject.activeInHierarchy && InsideHideout(owner.Transform.position)
+                && ClearSpotNear(owner.Transform.position, owner.Transform.position.y, 5f, owner.Transform.position, out at, out facing))
             { placed = true; MoveKennel(at, facing); Plugin.Log.LogInfo($"No room in the rest area; kennel placed near you at {at}."); }
+            // Otherwise round the Rest Space's pet bed, which is always on the hideout's floor.
+            if (!placed && HideoutProps.Where(HideoutProps.Bed, out Vector3 petBed) && FloorNear(petBed, .5f, out Vector3 bedFloor)
+                && ClearSpotNear(bedFloor, bedFloor.y, 5f, bedFloor, out at, out facing))
+            { placed = true; MoveKennel(at, facing); Plugin.Log.LogInfo($"No room in the rest area; kennel placed by the pet bed at {at}."); }
             if (!placed) { Plugin.Log.LogWarning("No clear floor for the kennel was found; the dog has no bed this visit."); return; }
             decor.SetKennelLevel(kennelLevel, Solid);
             decor.PlaceHome(at, facing);
@@ -214,6 +228,28 @@ namespace K9Companion
             foreach (Collider c in Physics.OverlapBox(centre, half, rotation, Solid, QueryTriggerInteraction.Ignore))
                 if (!Ignored(c)) return true;
             return false;
+        }
+
+        /// <summary>
+        /// Roughly inside the hideout: within a few metres of the box round its areas' icons (each floats over its area).
+        /// Out in the void round it is false. True when there aren't enough areas to tell.
+        /// </summary>
+        internal static bool InsideHideout(Vector3 p)
+        {
+            Bounds box = default; int n = 0;
+            try
+            {
+                foreach (HideoutArea area in FindObjectsOfType<HideoutArea>(true))
+                {
+                    if (area == null || area.AreaIconPoint == null) continue;
+                    Vector3 icon = area.AreaIconPoint.position;
+                    if (n++ == 0) box = new Bounds(icon, Vector3.zero); else box.Encapsulate(icon);
+                }
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("Couldn't measure the hideout: " + e.Message); return true; }
+            if (n < 4) return true;
+            return p.x > box.min.x - 8 && p.x < box.max.x + 8 && p.z > box.min.z - 8 && p.z < box.max.z + 8
+                   && p.y > box.min.y - 5 && p.y < box.max.y + 4;
         }
 
         // People, the dog and the kennel itself never count as obstacles.
@@ -377,7 +413,7 @@ namespace K9Companion
         {
             "Dog bed and bowls, food and water, the dog's health and condition, deployment",
             "Armour locker, jacket repairs, 2 equipment presets, better rest",
-            "Veterinary station (+50% healing), 4 presets, faster recovery, cosmetics, premium storage",
+            "Veterinary station (+50% healing), 4 presets, faster recovery, military kennel",
         };
 
         internal static void Patch(Harmony harmony)
@@ -454,16 +490,52 @@ namespace K9Companion
         // Each area screen shows either the kennel's levels or the rest of the Rest Space's, never both.
         private static bool Belongs(int level) => KennelView ? level > 0 : level == 0;
 
+        // The game's own words for improvements are placeholders ("The floor is being mopped"); the kennel's say what happens.
         private static void Status(ImprovementView __instance)
         {
             var improvement = ImprovementField.GetValue(__instance) as Improvement;
-            if (Level(improvement) > 0 && improvement.Completed && __instance._status != null) __instance._status.text = Lang.T("Built");
+            if (Level(improvement) == 0 || __instance._status == null) return;
+            if (improvement.Completed) __instance._status.text = Lang.T("Built");
+            else if (improvement.Processing)
+                __instance._status.text = Lang.T("Under construction") + " (" + TimeSpan.FromSeconds(Math.Max(0, improvement.TimeLeft())).ToString(@"hh\:mm\:ss") + ")";
+        }
+
+        private const string GameImproveKey = "hideout/improve";
+
+        // The start button's label: "Mop the floor" in the game's text, "BUILD" on a kennel level.
+        private static void Label(ImprovementView view, int level)
+        {
+            EFT.UI.DefaultUIButton button = view._startButton;
+            if (button == null) return;
+            if (level > 0) { if (button._text != Lang.T("BUILD")) button.SetRawText(Lang.T("BUILD"), button._fontSize); }
+            else if (button._text == Lang.T("BUILD")) button.SetText(GameImproveKey, button._fontSize, false);
+        }
+
+        /// <summary>
+        /// The Rest Space's own screen: its improvements list holds only the kennel's levels, which show in the kennel's
+        /// screen, so it would be an empty list headed with the game's placeholder "Mop the floor:". It is hidden there.
+        /// </summary>
+        private static void RestSpaceTidy(AreaScreenSubstrate substrate)
+        {
+            foreach (var list in substrate.GetComponentsInChildren<ImprovementPanel>(false))
+            {
+                if (list.AreaData?.Template?.Type != EAreaType.RestSpace) continue;
+                // Another mod's own Rest Space improvements are showing: the list is theirs as well, leave it.
+                if (list.GetComponentsInChildren<ImprovementView>(false).Any(v => v.gameObject.activeInHierarchy)) continue;
+                Hide(list.gameObject);
+            }
         }
 
         /// <summary>Every frame on the overview: while the kennel's screen is open, it shows nothing but the kennel.</summary>
         internal static void Enforce(HideoutScreenOverlay overlay, int level)
         {
-            if (!KennelView || overlay == null) return;
+            if (overlay == null) return;
+            if (!KennelView)
+            {
+                var shown = SubstrateField.GetValue(overlay) as AreaScreenSubstrate;
+                if (shown != null && shown.isActiveAndEnabled) RestSpaceTidy(shown);
+                return;
+            }
             var substrate = SubstrateField.GetValue(overlay) as AreaScreenSubstrate;
             if (substrate == null || !substrate.isActiveAndEnabled) { KennelView = false; return; }
             KennelIcon.Dress(substrate._areaPanel, level);
@@ -493,6 +565,7 @@ namespace K9Companion
                 int level = Level(improvement);
                 if (!Belongs(level)) { __instance.gameObject.SetActive(false); return; }
                 if (!__instance.gameObject.activeSelf) __instance.gameObject.SetActive(true);
+                Label(__instance, level);
                 if (level == 0) return;
                 Transform old = __instance.transform.Find("K9 kennel heading");
                 if (old != null) UnityEngine.Object.Destroy(old.gameObject);
@@ -767,6 +840,14 @@ namespace K9Companion
             if (sources.Count < Wanted.Count)
                 foreach (string name in Wanted) if (!sources.ContainsKey(name)) Plugin.Log.LogWarning($"Hideout prop {name} not found; the kennel uses a stand-in.");
             return sources.TryGetValue(mesh, out found) ? found : null;
+        }
+
+        /// <summary>Where the hideout's own prop stands (switched on or not), or false if the hideout doesn't have it.</summary>
+        public static bool Where(string mesh, out Vector3 position)
+        {
+            var source = Source(mesh);
+            position = source != null ? source.transform.position : default;
+            return source != null;
         }
 
         /// <summary>

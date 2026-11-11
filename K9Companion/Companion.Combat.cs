@@ -651,10 +651,15 @@ namespace K9Companion
         private bool Reachable(Vector3 point)
         {
             if (WalkingWithoutNavmesh) return HideoutRoute(dog.transform.position, point, out _);
-            if (!NavMesh.SamplePosition(dog.transform.position, out NavMeshHit from, 1.5f, NavMesh.AllAreas) ||
-                !NavMesh.SamplePosition(point, out NavMeshHit to, 2f, NavMesh.AllAreas)) return false;
-            var test = new NavMeshPath();
-            return NavMesh.CalculatePath(from.position, to.position, NavMesh.AllAreas, test) && test.status == NavMeshPathStatus.PathComplete;
+            if (NavMesh.SamplePosition(dog.transform.position, out NavMeshHit from, 1.5f, NavMesh.AllAreas) &&
+                NavMesh.SamplePosition(point, out NavMeshHit to, 2f, NavMesh.AllAreas))
+            {
+                var test = new NavMeshPath();
+                if (NavMesh.CalculatePath(from.position, to.position, NavMesh.AllAreas, test) && test.status == NavMeshPathStatus.PathComplete) return true;
+            }
+            // Off the navmesh (see RefreshPath): close by, over the floor itself.
+            return Flat(dog.transform.position, point) < 12 && Mathf.Abs(dog.transform.position.y - point.y) < 4
+                   && HideoutRoute(dog.transform.position, point, out _);
         }
 
         // The closest biteable part within mouth reach, with nothing solid between. Legs first; arms and body only if

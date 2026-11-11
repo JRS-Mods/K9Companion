@@ -49,8 +49,18 @@ namespace K9Companion
         private static Vector3 HideoutStart(Vector3 owner)
         {
             var saved = NeedsStore.Current;
-            if (saved != null && saved.HomeSet) return new Vector3(saved.HomeX, saved.HomeY, saved.HomeZ);
-            return KennelRoom.Prepare(out Vector3 corner, out _) ? corner : owner;
+            if (saved != null && saved.HomeSet)
+            {
+                var home = new Vector3(saved.HomeX, saved.HomeY, saved.HomeZ);
+                // Not a spot out in the void (where 1.3.1 could put the kennel); SetUpKennel finds it a new one.
+                if (saved.HomeByHand || InsideHideout(home)) return home;
+            }
+            if (KennelRoom.Prepare(out Vector3 corner, out _)) return corner;
+            // No home and no room yet: the Rest Space's pet bed, which is always on the hideout's floor. Your character
+            // isn't: on the overview it's switched off and parked where there may be no floor, so the dog never appeared
+            // (and with it the kennel's paw icon, which stands over the dog until the kennel is built) until you'd walked
+            // around in the hideout.
+            return HideoutProps.Where(HideoutProps.Bed, out Vector3 bed) ? bed : owner;
         }
 
         // In the hideout the dog and kennel show with the hideout (overview included) and hide while you're elsewhere.
@@ -361,12 +371,21 @@ namespace K9Companion
                 if (HideoutRoute(dog.transform.position, target, out Vector3[] route)) { corners = route; corner = 1; }
                 return;
             }
-            if (!NavMesh.SamplePosition(dog.transform.position, out NavMeshHit from, 1.5f, NavMesh.AllAreas)) return;
-            if (!NavMesh.SamplePosition(target, out NavMeshHit to, 2f, NavMesh.AllAreas)) return;
-            if (NavMesh.CalculatePath(from.position, to.position, NavMesh.AllAreas, path)
+            legsRoute = false;
+            if (NavMesh.SamplePosition(dog.transform.position, out NavMeshHit from, 1.5f, NavMesh.AllAreas)
+                && NavMesh.SamplePosition(target, out NavMeshHit to, 2f, NavMesh.AllAreas)
+                && NavMesh.CalculatePath(from.position, to.position, NavMesh.AllAreas, path)
                 && path.status == NavMeshPathStatus.PathComplete && path.corners.Length > 1)
-            { corners = path.corners; corner = 1; }
+            { corners = path.corners; corner = 1; return; }
+            // The bots' navmesh doesn't reach everywhere you can walk (upstairs in some buildings, small rooms): close by,
+            // the dog goes over the floor itself, in straight legs as at home.
+            if (Flat(dog.transform.position, target) < OffMeshReach && Mathf.Abs(dog.transform.position.y - target.y) < 6
+                && HideoutRoute(dog.transform.position, target, out Vector3[] legs))
+            { corners = legs; corner = 1; legsRoute = true; nextPath = Time.time + .8f; pathExpires = Time.time + 2f; }
         }
+
+        private const float OffMeshReach = 20f;
+        private bool legsRoute;   // following a floor route off the navmesh (raid)
 
         // A dog runs the way it faces. Steer turns it towards a point a little way along the path, so it starts round a
         // corner before reaching it; it moves along that heading, cutting the corner as an animal does. (Moving to each
@@ -378,7 +397,7 @@ namespace K9Companion
         {
             Vector3 pos = dog.transform.position;
             while (corner < corners.Length - 1 && Flat(pos, corners[corner]) < Mathf.Max(.35f, speed * .12f)) corner++;
-            if (WalkingWithoutNavmesh)
+            if (WalkingWithoutNavmesh || legsRoute)
             {
                 MoveAlongPath(step);
                 return;
@@ -441,14 +460,22 @@ namespace K9Companion
                     && Mathf.Abs(hit.position.y - around.y) < 1.5f)
                 { point = hit.position; return true; }
             }
-            point = Vector3.zero;
-            return false;
+            // No navmesh near you (it doesn't cover every floor you can walk on): clear floor beside you will do.
+            return FloorPoint(around, groundMask, out point);
         }
 
         private bool FindHideoutPoint(Vector3 around, out Vector3 point)
         {
             // Hideout floor colliders are not necessarily on the raid terrain layers.
             groundMask = Physics.DefaultRaycastLayers;
+            if (!FloorPoint(around, groundMask, out point)) return false;
+            navigationAvailable = NavMesh.SamplePosition(point, out NavMeshHit nav, .5f, NavMesh.AllAreas);
+            return true;
+        }
+
+        // Level floor beside 'around' (or under it), in clear sight of it at a dog's height.
+        private static bool FloorPoint(Vector3 around, int groundMask, out Vector3 point)
+        {
             for (int i = 0; i < 13; i++)
             {
                 float angle = i * 30 * Mathf.Deg2Rad;
@@ -461,7 +488,6 @@ namespace K9Companion
                     if (hit.normal.y < .65f || hit.collider.GetComponentInParent<Player>() != null || hit.point.y > around.y + .5f) continue;
                     if (offset.sqrMagnitude > .01f && Physics.Linecast(around + Vector3.up * .35f, hit.point + Vector3.up * .35f, groundMask, QueryTriggerInteraction.Ignore)) continue;
                     point = hit.point;
-                    navigationAvailable = NavMesh.SamplePosition(point, out NavMeshHit nav, .5f, NavMesh.AllAreas);
                     return true;
                 }
             }

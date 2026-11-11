@@ -1078,6 +1078,7 @@ namespace K9Companion
         private static void Place(Tab dog, Tab template, IReadOnlyDictionary<EInventoryTab, Tab> tabs)
         {
             var bar = template.transform.parent;
+            DogTabSpot.Unsqueeze();   // measured at the game's own widths
             var layout = bar.GetComponent<UnityEngine.UI.LayoutGroup>();
             if (layout != null && layout.enabled) { Report(dog, "by the tab bar's layout"); return; }
             var to = (RectTransform)dog.transform; var from = (RectTransform)template.transform;
@@ -1094,6 +1095,8 @@ namespace K9Companion
             spot.Step = step;
             spot.After = own;
             spot.First = game.FirstOrDefault() ?? from;
+            spot.Game = game;
+            spot.Full = to.sizeDelta;
             spot.MoveToFree();
             Report(dog, $"at {to.anchoredPosition}, the first free place right of {own.name}");
         }
@@ -1170,13 +1173,22 @@ namespace K9Companion
     {
         internal float Step;
         internal RectTransform After, First;
+        internal List<RectTransform> Game = new List<RectTransform>();
+        internal Vector2 Full;
+        // The game's tabs as they were before they were narrowed to make room (smaller window or resolution).
+        private static readonly Dictionary<RectTransform, (Vector2 at, Vector2 size)> originals = new Dictionary<RectTransform, (Vector2, Vector2)>();
+        private static readonly float[] Squeezes = { .9f, .85f, .8f };
         private float nextCheck;
         private static readonly Vector3[] Corners = new Vector3[4];
 
+        // In screen pixels, so things on different canvases compare: the back button isn't on the tab bar's canvas.
         private static Rect WorldRect(RectTransform t)
         {
             t.GetWorldCorners(Corners);
-            return Rect.MinMaxRect(Corners[0].x, Corners[0].y, Corners[2].x, Corners[2].y);
+            Canvas canvas = t.GetComponentInParent<Canvas>();
+            Camera cam = canvas == null || canvas.rootCanvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.rootCanvas.worldCamera;
+            Vector2 a = RectTransformUtility.WorldToScreenPoint(cam, Corners[0]), b = RectTransformUtility.WorldToScreenPoint(cam, Corners[2]);
+            return Rect.MinMaxRect(Mathf.Min(a.x, b.x), Mathf.Min(a.y, b.y), Mathf.Max(a.x, b.x), Mathf.Max(a.y, b.y));
         }
 
         // The tab's own rect, a little in from its edges so neighbours that only touch it don't count.
@@ -1191,6 +1203,12 @@ namespace K9Companion
         {
             if (!(other is RectTransform rect) || other == transform || other.IsChildOf(transform) || transform.IsChildOf(other)) return false;
             if (!other.gameObject.activeInHierarchy) return false;
+            // Faded out (a screen behind this one, kept active but not shown).
+            foreach (CanvasGroup g in other.GetComponentsInParent<CanvasGroup>())
+            {
+                if (g.alpha < .05f) return false;
+                if (g.ignoreParentGroups) break;
+            }
             Rect theirs = WorldRect(rect);
             // Backgrounds, panels and scroll areas aren't in the way; only things about the size of a tab or a button.
             if (theirs.width > inner.width * 4 || theirs.height > inner.height * 4 || theirs.width < 1 || theirs.height < 1) return false;
@@ -1204,18 +1222,15 @@ namespace K9Companion
             Transform bar = transform.parent;
             for (int i = 0; i < bar.childCount; i++)
                 if (Blocks(bar.GetChild(i), inner)) return bar.GetChild(i);
-            Canvas canvas = GetComponentInParent<Canvas>();
-            Transform root = canvas != null ? canvas.rootCanvas.transform : null;
+            // Every button on screen, whatever canvas it's on (the back button at the top right has its own).
             foreach (Selectable button in Selectable.allSelectablesArray)
-                if (button != null && (root == null || button.transform.IsChildOf(root)) && Blocks(button.transform, inner)) return button.transform;
+                if (button != null && button.isActiveAndEnabled && Blocks(button.transform, inner)) return button.transform;
             return null;
         }
 
         private bool OnScreen()
         {
-            Canvas canvas = GetComponentInParent<Canvas>();
-            if (canvas == null) return true;
-            Rect screen = WorldRect((RectTransform)canvas.rootCanvas.transform), mine = WorldRect((RectTransform)transform);
+            Rect screen = new Rect(0, 0, Screen.width, Screen.height), mine = WorldRect((RectTransform)transform);
             float slack = mine.width * .05f;
             return mine.xMin >= screen.xMin - slack && mine.xMax <= screen.xMax + slack && mine.yMin >= screen.yMin - slack && mine.yMax <= screen.yMax + slack;
         }
@@ -1229,20 +1244,65 @@ namespace K9Companion
         internal void MoveToFree()
         {
             if (Step < 1 || After == null || transform.parent == null) return;
+            var me = (RectTransform)transform;
+            if (Full.x < 1) Full = me.sizeDelta;
+            Unsqueeze();
+            me.sizeDelta = Full;
+            if (FreeSpot(Step)) return;
+            // In a smaller window (or at a lower resolution) the bar runs into the back button, more so with other mods'
+            // tabs on it: the game's tabs, and the DOG tab with them, are made a little narrower until it fits.
+            foreach (float f in Squeezes)
+            {
+                Squeeze(f);
+                if (FreeSpot(Step * f)) { Plugin.Log.LogInfo($"DOG tab: no room on the tab bar, so the tabs are {f * 100:0}% as wide."); return; }
+            }
+            Unsqueeze();
+            me.sizeDelta = Full;
+            // Nowhere free: right after the game's tabs, where it always used to go.
+            me.anchoredPosition = new Vector2(After.anchoredPosition.x + Step, After.anchoredPosition.y);
+        }
+
+        private bool FreeSpot(float step)
+        {
             float y = After.anchoredPosition.y;
             float right = After.anchoredPosition.x, left = (First != null ? First : After).anchoredPosition.x;
             for (int i = 1; i <= 16; i++)
             {
-                if (TryAt(right + i * Step, y)) return;
+                if (TryAt(right + i * step, y)) return true;
                 if (!OnScreen()) break;
             }
             for (int i = 1; i <= 4; i++)
             {
-                if (TryAt(left - i * Step, y)) return;
+                if (TryAt(left - i * step, y)) return true;
                 if (!OnScreen()) break;
             }
-            // Nowhere free: right after the game's tabs, where it always used to go.
-            ((RectTransform)transform).anchoredPosition = new Vector2(right + Step, y);
+            return false;
+        }
+
+        // The game's tabs at f of their width and spacing, from where the first one starts; the DOG tab likewise.
+        private void Squeeze(float f)
+        {
+            if (Game.Count == 0) return;
+            foreach (RectTransform t in Game)
+                if (t != null && !originals.ContainsKey(t)) originals[t] = (t.anchoredPosition, t.sizeDelta);
+            RectTransform first = First != null && originals.ContainsKey(First) ? First : Game[0];
+            float origin = originals[first].at.x;
+            foreach (RectTransform t in Game)
+            {
+                if (t == null) continue;
+                var (at, size) = originals[t];
+                t.anchoredPosition = new Vector2(origin + (at.x - origin) * f, at.y);
+                t.sizeDelta = new Vector2(size.x * f, size.y);
+            }
+            ((RectTransform)transform).sizeDelta = new Vector2(Full.x * f, Full.y);
+        }
+
+        /// <summary>The game's tabs back at their own widths and places.</summary>
+        internal static void Unsqueeze()
+        {
+            foreach (var pair in originals)
+                if (pair.Key != null) { pair.Key.anchoredPosition = pair.Value.at; pair.Key.sizeDelta = pair.Value.size; }
+            originals.Clear();
         }
 
         private void LateUpdate()

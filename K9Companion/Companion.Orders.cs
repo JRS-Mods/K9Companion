@@ -675,7 +675,8 @@ namespace K9Companion
         {
             route = null;
             if (!FloorNear(to, .6f, out Vector3 end)) end = to;
-            if (Walkable(from, end)) { route = new[] { from, end }; return true; }
+            bool climb = !IsHideout;   // raid floors have stairs; the hideout's legs are level
+            if (Walkable(from, end, climb)) { route = new[] { from, end }; return true; }
             float best = float.MaxValue; Vector3 turn = default;
             foreach (Vector3 around in new[] { from, end })
                 for (float radius = 1.2f; radius <= 3.6f; radius += 1.2f)
@@ -684,7 +685,7 @@ namespace K9Companion
                         float a = i * 22.5f * Mathf.Deg2Rad;
                         if (!FloorNear(around + new Vector3(Mathf.Sin(a), 0, Mathf.Cos(a)) * radius, .5f, out Vector3 corner)) continue;
                         float length = Flat(from, corner) + Flat(corner, end);
-                        if (length < best && Walkable(from, corner) && Walkable(corner, end)) { best = length; turn = corner; }
+                        if (length < best && Walkable(from, corner, climb) && Walkable(corner, end, climb)) { best = length; turn = corner; }
                     }
             if (best == float.MaxValue) return false;
             route = new[] { from, turn, end };
@@ -692,12 +693,14 @@ namespace K9Companion
         }
 
         // Nothing solid at the dog's body height along the way, and floor under every step with no drop or wall of steps.
-        private static bool Walkable(Vector3 a, Vector3 b)
+        // 'climb': up and down stairs, the body checked at each step's own height rather than the start's.
+        private static bool Walkable(Vector3 a, Vector3 b, bool climb = false)
         {
             Vector3 flat = b - a; flat.y = 0;
             float length = flat.magnitude;
             if (length < .05f) return true;
             Vector3 direction = flat / length;
+            if (climb) return Climbable(a, b, direction, length);
             Vector3 low = a + Vector3.up * (.25f + DogRadius), high = a + Vector3.up * (.9f - DogRadius);
             foreach (RaycastHit hit in Physics.CapsuleCastAll(low, high, DogRadius, direction, length, Solid, QueryTriggerInteraction.Ignore))
                 if (hit.distance > 0 && !Ignored(hit.collider)) return false;
@@ -707,6 +710,21 @@ namespace K9Companion
                 Vector3 p = a + direction * Mathf.Min(d, length);
                 if (!FloorNear(new Vector3(p.x, y, p.z), .3f, out Vector3 floor)) return false;
                 y = floor.y;
+            }
+            return Mathf.Abs(y - b.y) < .5f;
+        }
+
+        private static bool Climbable(Vector3 a, Vector3 b, Vector3 direction, float length)
+        {
+            float y = a.y;
+            for (float d = .35f; d < length + .35f; d += .35f)
+            {
+                Vector3 p = a + direction * Mathf.Min(d, length);
+                if (!FloorNear(new Vector3(p.x, y, p.z), .3f, out Vector3 floor)) return false;
+                y = floor.y;
+                foreach (Collider c in Physics.OverlapCapsule(floor + Vector3.up * (.25f + DogRadius), floor + Vector3.up * (.9f - DogRadius),
+                                                              DogRadius, Solid, QueryTriggerInteraction.Ignore))
+                    if (!Ignored(c)) return false;
             }
             return Mathf.Abs(y - b.y) < .5f;
         }
