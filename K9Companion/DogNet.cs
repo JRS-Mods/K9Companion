@@ -324,7 +324,7 @@ namespace K9Companion
             if (state.Walking) model.TickGait(clip, layer, state.LayerWeight, state.Playback, Time.deltaTime);
             else model.Tick(clip, layer, state.LayerWeight, state.Playback, Time.deltaTime, state.Looping);
             decor?.Update();
-            if (!state.Dead) sound?.Breathe(.15f, .95f); else sound?.Breathe(0, 1);
+            sound?.Breathe(0, 1);   // it pants only after a hard run, which only its own game knows
         }
 
         // Between the two messages either side of a moment ago; past the last one, held there.

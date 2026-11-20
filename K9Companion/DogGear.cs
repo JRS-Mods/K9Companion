@@ -76,8 +76,16 @@ namespace K9Companion
         internal static bool IsHolder(Item item) => item != null && item.TemplateId.ToString() == HolderTemplate;
         internal static bool IsLocker(Item item) => item != null && (item.TemplateId.ToString() == ArmourLocker || item.TemplateId.ToString() == PremiumLocker);
 
+        // In the quest stash, where the server mod keeps it; one that ended up anywhere else in your inventory still opens
+        // (the server mod puts it back at the next game start).
         internal static CompoundItem Locker(Profile profile, string template)
-            => profile?.Inventory?.QuestStashItems?.GetAllItems().FirstOrDefault(i => i.TemplateId.ToString() == template) as CompoundItem;
+        {
+            Inventory inventory = profile?.Inventory;
+            if (inventory == null) return null;
+            foreach (Item root in new Item[] { inventory.QuestStashItems, inventory.Stash, inventory.SortingTable, inventory.Equipment })
+                if (root?.GetAllItems().FirstOrDefault(i => i.TemplateId.ToString() == template) is CompoundItem locker) return locker;
+            return null;
+        }
         internal static string Look(Item jacket) => jacket != null && Jackets.TryGetValue(jacket.TemplateId.ToString(), out string c) ? c : null;
         // The look of any of the dog's gear (jacket, head gear, camera, collar) or supplies: its model as an item and its stash icon.
         internal static string AnyLook(Item item)
@@ -575,7 +583,7 @@ namespace K9Companion
     internal static class DogBag
     {
         private const string StartRoute = "/k9companion/bag/raid-start", DogDiedRoute = "/k9companion/bag/dog-died", DogRevivedRoute = "/k9companion/bag/dog-revived",
-            GearTakenRoute = "/k9companion/bag/gear-taken";
+            GearTakenRoute = "/k9companion/bag/gear-taken", DogExtractedRoute = "/k9companion/bag/dog-extracted";
 
         /// <summary>This raid, you've taken the killed dog's gear (Companion.TakeGear).</summary>
         internal static bool GearTaken { get; private set; }
@@ -673,6 +681,17 @@ namespace K9Companion
             // stash owned by another controller, which broke transfers and left the player "busy".
             owner.ShowInventoryScreenLoot(bag, () => { }, false);
             return null;
+        }
+
+        // You died and played the dog out through an extract: its jacket and kit come home (the server keeps them).
+        internal static void DogExtracted()
+        {
+            try
+            {
+                string reply = RequestHandler.PostJson(DogExtractedRoute, "{}");
+                if (reply == null || !reply.Contains("\"ok\":true")) Plugin.Log.LogWarning("The server mod didn't record the dog getting out (an older server mod?): " + reply);
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("Couldn't tell the server the dog got out: " + e.Message); }
         }
 
         internal static void DogDied()

@@ -18,6 +18,32 @@ The dog walks when close, runs once it is more than 6 m behind you, and sprints 
 
 Settings (Movement section): FollowDistance (2 m), RunDistance (6 m), SprintDistance (15 m), and WalkSpeedMultiplier / RunSpeedMultiplier / SprintSpeedMultiplier (1.0). A follow distance you set in an earlier version is carried over.
 
+## Jumping
+
+In raids the dog jumps over what's in its way: a fence, a crate, a low wall or a gap, and down off a ledge, with its own jump animations (from a stand, a trot and a run). It jumps when the way round is a long detour, when there's no way round at all, or when it's stuck against something low; a few metres short of it, it runs up to it first. Anything taller than about 90 cm it doesn't try. When the dog is lost or stuck for good it still turns up beside you as before.
+
+## God mode
+
+Combat > God mode (F12): with combat mode on, the dog fights as usual but nothing hurts it. Bots still shoot at it. The server's owner can fix it for everyone with `godMode` in `config.jsonc`.
+
+## Carrying on as the dog
+
+Combat > Control the dog when you die (F12, off by default). When you're killed in a raid with your dog alive, the raid doesn't end: the camera goes behind the dog and it's yours.
+
+| Key | |
+|---|---|
+| W A S D | Move (relative to where you look) |
+| Shift / Ctrl | Run / sneak |
+| Mouse | Look round |
+| Space | Jump, always, straight on: from a stand, a trot or a run. It goes over anything low enough and comes down wherever the ground is; a wall or a shut door cuts it short (Controls > Dog jump) |
+| F | Nose open the door in front of it, if it isn't locked (Controls > Dog: open door). Shut doors stop it, as they stop you |
+| O | The raid time and the extracts, as when you're alive |
+| Esc | The game's raid menu (settings; Leave ends the raid) |
+| Left click | Send it at the enemy nearest the middle of the screen; moving it yourself calls it off |
+| Return | End the raid (Controls > Stop controlling the dog) |
+
+Your quick slots, weapon and body figure are hidden while you play the dog, and the keys are listed at the top of the screen. Walk the dog into an open extract (one you could have used) and you get the game's own green "Extraction in" countdown and the extract lit in the list; stand there for the extract's usual time: it's out, and its jacket, what's in it and its kit come home with it. The raid always counts as your death, so your own gear is lost (and insured as usual). If the dog is killed, or you press Return, the raid ends. With Fika, Fika's spectator view waits until the dog's part is over: in a group you then spectate as usual, on your own the raid ends. The server's owner can turn it off for everyone with `controlAfterDeath`.
+
 ## On raid day
 
 - **Raid screens.** On the CONFIRMATION screen (the one with READY) the dog stands next to your character, in the gear it wears into the raid; drag it to turn it. Under it: its health, hunger and thirst, and **TAKE DOG** (yes/no, the same switch as the config's Enabled). While deploying, the dog is in the party list under you (a paw, its training level, its name): click its name and the big picture shows the dog, click yours and it's your character again; its eye opens its loadout (jacket, head gear, camera; the jacket opens like a container).
@@ -55,7 +81,7 @@ The jackets have slots but no weight limit, and what the dog carries never count
 
 ## Settings for everyone on a server
 
-The owner of the SPT server can fix dog settings for all its players in `SPT_Runtime/user/mods/K9Companion.Server/config.jsonc` (made the first time the server starts): combat mode, aggression, approach, Auto's rush distance, defend range, engagement distance, ordered range, bites to kill (and for bosses), bite cooldown and stagger, dog health, solo raids only, the downed state and its time limit, and the carry limit. Each one left `null` stays each player's own setting. With Fika that means everyone in the raid plays by the same rules, as they all use the same SPT server. Saved changes count from each player's next raid, with no restart. In the DOG tab a fixed setting is marked (SERVER), and F12 changes to it do nothing. A mistake in the file fixes nothing, and the server log says what's wrong.
+The owner of the SPT server can fix dog settings for all its players in `SPT_Runtime/user/mods/K9Companion.Server/config.jsonc` (made the first time the server starts): combat mode, aggression, approach, Auto's rush distance, defend range, engagement distance, ordered range, bites to kill (and for bosses), bite cooldown and stagger, dog health, solo raids only, the downed state and its time limit, the carry limit, god mode and carrying on as the dog after you die. Each one left `null` stays each player's own setting. With Fika that means everyone in the raid plays by the same rules, as they all use the same SPT server. Saved changes count from each player's next raid, with no restart. In the DOG tab a fixed setting is marked (SERVER), and F12 changes to it do nothing. A mistake in the file fixes nothing, and the server log says what's wrong.
 
 ## Combat settings (Combat section of the config)
 
@@ -126,7 +152,7 @@ The dog has no eating or drinking animations of its own; meals use the nose-to-g
 
 ## DOG tab (character screen)
 
-The character screen has a **DOG** tab after the game's own tabs (main menu, hideout and raid). It keeps your stash on the right and shows the dog in place of your equipment:
+The character screen has a **DOG** tab after the game's own tabs (main menu, hideout and raid). When other mods' tabs (wrist accessories, weekend drops and so on) don't all fit, the tab bar scrolls: mouse wheel over the tabs, or the arrows at its right end. It keeps your stash on the right and shows the dog in place of your equipment:
 
 - Health (in a raid: its current health or DEAD; otherwise its full health, or "can't be hurt" when CombatMode is off), hunger and thirst.
 - Combat mode on/off and the aggression level, changeable right there.
@@ -319,7 +345,7 @@ The old setup depended on the raid GameWorld.MainPlayer reference and raid floor
 
 Crouching/prone selects sneak movement and idle. Resting includes sitting, lying, sleeping and get-up transitions. The collar (one of three collar models, fitted mid-neck and skinned like the harnesses) moves with the neck.
 
-Dish levels are real and saved (see Hunger and thirst). Petting plays a dog response without animating player hands. Whistles, happy sounds and rare whining are local. Recorded sounds ship in `sounds` beside the DLL (`tools/convert_sounds.py` cuts and levels them): four barks (one picked at random), a whine, a shake (sometimes, when it gets up from lying), and breathing: a seamless loop of the panting, cleaned of its background noise, that plays all the time, heard only close by, quiet and slow at rest, softer asleep, harder and faster after a run or when it's hurt (Audio > Breathing volume, 0.35). Recorded and synthesized sounds are all levelled to the same loudness, and the recordings are denoised. Whistle and happy are synthesized unless whistle.wav / happy.wav are added; any sound can have takes named <name>_1.wav ... (16-bit PCM WAV, mono/stereo, 8–96 kHz, under 10 MB).
+Dish levels are real and saved (see Hunger and thirst). Petting plays a dog response without animating player hands. Whistles, happy sounds and rare whining are local. Recorded sounds ship in `sounds` beside the DLL (`tools/convert_sounds.py` cuts and levels them): four barks (one picked at random), a whine, a shake (sometimes, when it gets up from lying), and panting: a seamless loop, cleaned of its background noise, heard only close by, and only after a hard run (keeping up with you sprinting, or a chase); it dies away over half a minute and the dog is quiet the rest of the time (Audio > Breathing volume). Recorded and synthesized sounds are all levelled to the same loudness, and the recordings are denoised. Whistle and happy are synthesized unless whistle.wav / happy.wav are added; any sound can have takes named <name>_1.wav ... (16-bit PCM WAV, mono/stereo, 8–96 kHz, under 10 MB).
 
 ## Moving the kennel
 

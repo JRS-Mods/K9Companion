@@ -19,7 +19,7 @@ namespace K9Companion
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id = "jrs.k9companion";
-        public const string Version = "1.3.2";
+        public const string Version = "1.4.0";
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> Active, CombatMode, SurvivalNeeds, AutoFeedInHideout, CarryOverInjuries;
         internal static ConfigEntry<DogApproach> ApproachMode;
@@ -42,7 +42,8 @@ namespace K9Companion
         internal static ConfigEntry<float> Volume, BreathingVolume;
         internal static ConfigEntry<KeyboardShortcut> Stay, Lie, Rename, Pet, Feed, Water, DogCamKey;
         internal static ConfigEntry<bool> DogCamShow;
-        internal static ConfigEntry<bool> SoloRaidsOnly, DownedInsteadOfKilled, HealthBar, HealthBarFade;
+        internal static ConfigEntry<bool> SoloRaidsOnly, DownedInsteadOfKilled, HealthBar, HealthBarFade, GodMode, ControlAfterDeath, SnowOnDog;
+        internal static ConfigEntry<KeyboardShortcut> LeaveDog, DogJump, DogDoor;
         internal static ConfigEntry<HealthBarPlace> HealthBarAt;
         internal static ConfigEntry<KeyboardShortcut> Bring;
         internal static ConfigEntry<float> BleedOutTime, CarryLimit;
@@ -122,6 +123,15 @@ namespace K9Companion
                 Adv("When the dog's health runs out in a raid it collapses instead of dying, and you can revive it with a K9 veterinary kit " +
                 "(look at it and press your interact key, or use the kit). It gets up at 35% health. Enemies leave it alone while it's down. " +
                 "If it isn't revived in time, or the raid ends first, that counts as the dog being killed."));
+            GodMode = Config.Bind("Combat", "God mode", false,
+                "The dog fights as usual (with combat mode on) but can't be hurt or killed: hits do nothing to it. Bots still shoot at it.");
+            ControlAfterDeath = Config.Bind("Combat", "Control the dog when you die", false,
+                "When you're killed in a raid with your dog alive, you carry on as the dog instead of the raid ending: WASD to move " +
+                "(Shift to sprint, Ctrl to sneak), the mouse to look, Space to jump, left click to attack the enemy you're looking at. " +
+                "Get the dog to an open extract and it comes home with its jacket and what's in it. Your own gear is lost as usual.");
+            LeaveDog = Key("Stop controlling the dog", KeyCode.Return, "While you're controlling the dog after dying: end the raid now.");
+            DogJump = Key("Dog jump", KeyCode.Space, "While you're controlling the dog after dying: jump (over a fence, a crate, a gap).");
+            DogDoor = Key("Dog: open door", KeyCode.F, "While you're controlling the dog after dying: nose open the door in front of it (not a locked one).");
             BleedOutTime = Config.Bind("Combat", "Downed: time to revive", 180f, Adv(
                 "Seconds you have to revive a downed dog. Treating it stops the clock. 0 = as long as the raid lasts.", new AcceptableValueRange<float>(0f, 600f)));
             SurvivalNeeds = Config.Bind("Survival", "EnableSurvivalNeeds", true,
@@ -138,11 +148,15 @@ namespace K9Companion
                 "Below 25% health the dog stays home. Off: the dog starts every raid at full health, as before 0.16."));
             CombatMode.SettingChanged += (_, __) => Log.LogInfo("Combat mode " + (CombatMode.Value ? "on" : "off") + ": " + Describe(Rules(false)));
             DogAggression.SettingChanged += (_, __) => Log.LogInfo("Dog aggression: " + Describe(Rules(false)));
+            GodMode.SettingChanged += (_, __) => Log.LogInfo("Dog god mode " + (GodMode.Value ? "on" : "off") + ": " + Describe(Rules(false)));
             CarryLimit = Config.Bind("Movement", "Carry limit (kg)", 0f, Adv(
                 "How much the dog's jacket and what's in it can weigh in a raid before the dog slows down: slower in proportion above it, " +
                 "down to half speed at most. 0 = no limit. What the dog carries never counts towards your own weight.", new AcceptableValueRange<float>(0f, 200f)));
             Scale = Config.Bind("Appearance", "Scale", 1f,
                 Adv("Dog size; applied when it spawns.", new AcceptableValueRange<float>(0.5f, 2f)));
+            SnowOnDog = Config.Bind("Appearance", "Snow on the dog", false,
+                "On snowy maps the game paints snow over the ground and everything else that isn't a person. Off: the dog " +
+                "stays clear of it, as you and the bots do. On: it gets the same snow as the ground.");
             Recall = Config.Bind("Controls", "Recall", new KeyboardShortcut(KeyCode.F8), "Call the dog back: it runs to you and follows again.");
             Bring = Key("Bring dog to me", KeyCode.F8, "Put the dog straight in front of you (for when it's stuck), following you again. " +
                 "Also in the DOG commands of the Y menu.", KeyCode.LeftShift);
@@ -160,7 +174,7 @@ namespace K9Companion
             RareWhine = Config.Bind("Audio", "Rare whining", true, Adv("Occasional quiet whine while resting; suppressed when crouching."));
             Volume = Config.Bind("Audio", "Volume", 0.35f, new ConfigDescription("Local companion sound volume.", new AcceptableValueRange<float>(0, 1)));
             BreathingVolume = Config.Bind("Audio", "Breathing volume", 0.175f, Adv(
-                "How loud the dog's breathing is, next to its other sounds (it breathes all the time: quietly at rest, harder after running or when hurt). 0 = silent.",
+                "How loud the dog's panting is, next to its other sounds. It only pants after a hard run (keeping up with you sprinting, or a chase), and is quiet otherwise. 0 = silent.",
                 new AcceptableValueRange<float>(0, 1)));
             Stay = Key("Stay or follow", KeyCode.F7, "Toggle stay and follow.");
             Lie = Key("Lie down", KeyCode.F7, "Lie down here.", KeyCode.LeftShift);
@@ -215,6 +229,7 @@ namespace K9Companion
             PatchFeature("dog gear models (inspect, on the ground)", GearVisuals.Patch);
             PatchFeature("DOG tab", DogTab.Patch);
             PatchFeature("NPC targeting", DogThreat.Patch);
+            PatchFeature("controlling the dog after you die", DogControlPatches.Patch);
             PatchFeature("the dog hearing gunfire at you", DogThreat.PatchGunfire);
             PatchFeature("K9 quest events (kills with the dog)", K9Events.Patch);
             PatchFeature("K9 Kennel in the Rest Space", KennelUi.Patch);
@@ -278,7 +293,7 @@ namespace K9Companion
         // The one place raw combat settings turn into permissions; everything else reads this.
         internal static DogRules Rules(bool hideout) => DogRules.Resolve(Combat, Aggressiveness,
             ServerRules.EngageDistance ?? EngageDistance.Value,
-            ServerRules.BitesToKill ?? BitesToKill.Value, ServerRules.BossBitesToKill ?? BossBitesToKill.Value, MaxHealth, !hideout, ServerRules.BiteCooldown ?? BiteCooldown.Value);
+            ServerRules.BitesToKill ?? BitesToKill.Value, ServerRules.BossBitesToKill ?? BossBitesToKill.Value, MaxHealth, !hideout, ServerRules.BiteCooldown ?? BiteCooldown.Value, God);
 
         // A setting as it counts: what the server's owner has fixed for everyone (ServerRules), else your own.
         internal static bool Combat => ServerRules.CombatMode ?? CombatMode.Value;
@@ -292,11 +307,13 @@ namespace K9Companion
         internal static float MaxHealth => ServerRules.DogHealth ?? DogHealth.Value;
         internal static bool SoloOnly => ServerRules.SoloOnly ?? SoloRaidsOnly.Value;
         internal static bool Downable => ServerRules.DownedMode ?? DownedInsteadOfKilled.Value;
+        internal static bool God => ServerRules.GodMode ?? GodMode.Value;
+        internal static bool CarryOnAsDog => ServerRules.ControlAfterDeath ?? ControlAfterDeath.Value;
         internal static float BleedOut => ServerRules.BleedOutTime ?? BleedOutTime.Value;
         internal static float CarryLimitNow => ServerRules.CarryLimit ?? CarryLimit.Value;
 
         private static string Describe(DogRules r) => r.Combat
-            ? $"{r.Aggression}, auto-engage {r.AutoEngage}, cooldown {r.BiteCooldown:0.0} s, engage {r.EngageDistance:0} m, bites to kill {r.BitesToKill:0.#} (bosses {r.BossBitesToKill:0.#}), health {r.Health:0}, mortal"
+            ? $"{r.Aggression}, auto-engage {r.AutoEngage}, cooldown {r.BiteCooldown:0.0} s, engage {r.EngageDistance:0} m, bites to kill {r.BitesToKill:0.#} (bosses {r.BossBitesToKill:0.#}), health {r.Health:0}, {(r.Immortal ? "god mode" : "mortal")}"
             : "passive, immortal, not targeted";
 
         internal static Tuning Tuning => new Tuning
@@ -414,14 +431,15 @@ namespace K9Companion
 
         public static DogRules Resolve(bool combatMode, Aggression aggression,
                                        float engageDistance, float bitesToKill, float bossBitesToKill, float health, bool inRaid,
-                                       float biteCooldown = DefaultCooldown)
+                                       float biteCooldown = DefaultCooldown, bool godMode = false)
         {
             // The hideout never has combat, whatever the setting says.
             bool combat = combatMode && inRaid;
             var rules = new DogRules
             {
                 Combat = combat,
-                Immortal = !combat,
+                // God mode: it fights, and is shot at, but nothing hurts it.
+                Immortal = !combat || godMode,
                 CanBeTargeted = combat,
                 Aggression = combat ? aggression : Aggression.Passive,
                 EngageDistance = Sane(engageDistance, 5, 60, DefaultEngage),

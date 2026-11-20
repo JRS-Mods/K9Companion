@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.4.0
+
+Needs SPT 4.1.x. Install over 1.3.2 (client and server). With Fika, everyone updates, as the version is the same throughout.
+
+### Added
+
+- **The dog jumps.** Over a fence, a crate, a low wall or a gap, and down off a ledge, using its own jump animations (from a stand, a trot and a run). It jumps when the way round is a long detour, when there's no way round at all, or when it's stuck against something low; if it's a few metres off, it runs up to it first. Anything taller than about 90 cm it doesn't try, and teleporting back to you when it's lost works as before.
+- **Combat > God mode** (F12): the dog fights as usual but can't be hurt or killed. Bots still shoot at it. The server owner can fix it for everyone (`godMode` in the server mod's config.jsonc).
+- **Combat > Control the dog when you die** (F12, off by default): when you're killed with your dog alive, you carry on as the dog instead of the raid ending. WASD moves it (Shift runs, Ctrl sneaks), the mouse looks round, Space jumps, left click sends it at the enemy you're looking at, and Return ends the raid (both keys can be changed). Get the dog to an open extract and it comes home with its jacket, what's in it and its kit; your own gear is lost as usual, and the raid always counts as your death. Works with Fika: Fika's spectator view waits until the dog's part is over (in a group you then spectate as usual; on your own the raid ends). The server owner can turn it off for everyone (`controlAfterDeath`).
+
+### Changed
+
+- **The character screen's tab bar scrolls** when other mods' tabs (wrist accessories, weekend drops and so on) don't all fit: mouse wheel over the tabs, or the arrows at its right end. Nothing goes under the BACK button any more, and the game's tabs are no longer made narrower to fit.
+- **No panting at rest.** The dog only pants after a hard run (keeping up with you sprinting, or a chase), and is quiet otherwise. Other players' dogs (Fika) don't pant.
+- **No more snow on the dog.** On snowy maps the game paints snow over everything that isn't a person, so the dog came out covered. It now stays clear of it, as you and the bots do. **Appearance > Snow on the dog** (F12) brings the snow back if you want it.
+- **Playing the dog after you die:** your HUD (quick slots, weapon, body figure) is hidden; in an extract you get the game's own green "Extraction in" countdown and its line in the extracts list lit, as when you're alive; **O** shows the raid time and the extracts; **Esc** opens the game's raid menu (settings, leave); **F** noses open the door in front of it (not a locked one: Controls > Dog: open door). Shut doors stop it, as they stop you. **Space always jumps** (from a stand, a trot or a run, straight on): over anything low enough, landing wherever the ground is, cut short only by a wall or a shut door. The camera keeps in front of pipes and beams instead of ending up behind them.
+
+### Fixed
+
+- **"The locker is set up the next time you start the game" every time, at any kennel level.** The DOG tab's ARMOUR LOCKER and PREMIUM STORAGE open hidden containers the server mod keeps for you. When one of them had ended up anywhere else in your profile, the server mod saw it was there and never set it up again, so the DOG tab never found it. A locker outside its place is now put back, with what's in it, and a missing one is made; and nothing else the server mod does at game start can stop that any more. Clicking the button now asks the server straight away and tells you what happened: one restart of the game and the locker opens.
+
+- **Dr. Yang's quests completing themselves after a prestige** (reported with Teeth and Steel: taken, then marked done on opening the DOG tab). The dog's progress was kept per profile, and a prestige (or a wipe) makes a new character on the same profile, so the old progress was written straight back. A new character now starts over as a new handler; the old K9 files are kept beside the new ones (`.old-character-<time>`).
+- **The dog getting lost on stairs and teleporting to you.** Tested by walking up and down 36 stairways in Factory and Customs, plus spots the bots' navmesh doesn't cover:
+  - Following you down a switchback stair, it sat on the flight above your head: it judged "beside you" by straight-line distance. It now goes by how far it has to walk to you.
+  - Down a steep flight it cut the corner, kept its height and stood in the air above the stairs until it was teleported. It now keeps to the ground, going down as well as up.
+  - Off the navmesh (the steep outdoor stairs at the Customs construction site, round the end of a railing and down a step) it could only plan one or two straight legs. It now follows the way you walked, as a dog follows a trail, and searches the floor itself if that doesn't help. Steep stairs (up to 45°) count as floor.
+  - A run-up to a jump that it then didn't take left it standing still for five seconds, then lost.
+  - Cutting a corner at a switchback, it could step out over the edge onto a beam beside the flight below, or drop onto a platform underneath; and where two turns of a stair were one above the other it went 1.6 m up in one step. It now cuts a corner only where the ground is where the stairs are, and never climbs or drops faster than a steep stair.
+  - It still teleports to you when there's really no way: a spot you vaulted onto that's too high to jump, or a room it can't get out of.
+
 ## 1.3.2
 
 Needs SPT 4.1.x. Install over 1.3.1. With Fika, everyone updates, as the version is the same throughout.

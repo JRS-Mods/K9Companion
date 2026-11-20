@@ -460,6 +460,7 @@ namespace K9Companion
         private void OnGUI()
         {
             if (dog == null || CurrentPlayer == null || CurrentPlayer.IsInventoryOpened) return;
+            OnControlGUI();
             if (Time.unscaledTime >= messageUntil) return;
             if (shownMessage == null || shownMessage.text != message) shownMessage = new GUIContent(message);
             Vector2 size = GUI.skin.box.CalcSize(shownMessage);
@@ -692,6 +693,130 @@ namespace K9Companion
             return true;
         }
 
+        // Your trail (raids): where you've walked, a point every half metre, the last 100 m. Off the navmesh the dog goes
+        // the way you went, as a dog does: a floor search from the top of a steep stair ran out of room on the floor above
+        // before it tried the stair (it heads for the nearest point to you, which was the wrong way), while your own way
+        // down passed every one of the dog's step checks. A jump over 1.5 m in a frame (a teleport) starts a new trail.
+        private readonly List<Vector3> trail = new List<Vector3>();
+        private const int TrailPoints = 200;
+
+        private void RecordTrail(Vector3 owner)
+        {
+            if (trail.Count > 0)
+            {
+                Vector3 last = trail[trail.Count - 1];
+                float moved = Vector3.Distance(last, owner);
+                if (moved < .5f) return;
+                if (moved > 1.5f && Time.deltaTime < .2f) trail.Clear();
+            }
+            trail.Add(owner);
+            if (trail.Count > TrailPoints) trail.RemoveRange(0, trail.Count - TrailPoints);
+        }
+
+        // From the dog onto your trail where it can walk straight to it, then along it to you, straightened where a straight
+        // walk is clear; it stops short of a step you climbed or dropped that a dog can't walk (a vault, a ledge: the
+        // jumping takes over there).
+        private bool TrailRoute(Vector3 from, Vector3 to, out Vector3[] route)
+        {
+            route = null;
+            if (trail.Count < 2 || Flat(trail[trail.Count - 1], to) > 1.5f) return false;
+            int join = -1; float best = 4f;
+            for (int i = trail.Count - 1; i >= 0; i--)
+            {
+                float d = Vector3.Distance(trail[i], from);
+                if (d < best && Mathf.Abs(trail[i].y - from.y) < .6f && Walkable(from, trail[i], true)) { best = d; join = i; }
+            }
+            if (join < 0) return false;
+            var legs = new List<Vector3> { from, trail[join] };
+            for (int k = join; k < trail.Count - 1;)
+            {
+                int next = k + 1;
+                if (Mathf.Abs(trail[next].y - trail[k].y) > Mathf.Max(.45f, Flat(trail[k], trail[next]) * 1.1f + .05f)) break;
+                for (int j = Mathf.Min(trail.Count - 1, k + 8); j > k + 1; j--)
+                    if (Walkable(trail[k], trail[j], true)) { next = j; break; }
+                legs.Add(trail[next]); k = next;
+            }
+            if (legs.Count < 3 && Flat(legs[legs.Count - 1], from) < .5f) return false;
+            route = legs.ToArray();
+            return true;
+        }
+
+        // Off the navmesh in a raid, where one or two straight legs won't do (round the end of a railing and down a step,
+        // a stairway that turns): a search over the floor itself in 40 cm steps, up to 20 m out, each step a foothold no
+        // more than 45 cm up or down with room for the body and nothing in between; then straightened into as few legs
+        // as walk clear. Only when the navmesh has no way, and at most about once a second.
+        private const float GridStep = .4f;
+        private const int GridSearch = 700;
+        internal static string LastFloorSearch;   // why the last search found nothing (for the dev test harness)
+
+        private static bool FloorRoute(Vector3 from, Vector3 to, out Vector3[] route)
+        {
+            route = null;
+            var at = new List<Vector3> { from };
+            var parent = new List<int> { -1 };
+            var cost = new List<float> { 0 };
+            var seen = new HashSet<(int, int, int)> { GridKey(from) };
+            var open = new SortedSet<(float, int)> { (Vector3.Distance(from, to), 0) };
+            int goal = -1;
+            for (int expanded = 0; open.Count > 0 && expanded < GridSearch; expanded++)
+            {
+                var best = open.Min; open.Remove(best);
+                int i = best.Item2;
+                Vector3 here = at[i];
+                if (Flat(here, to) < .6f && Mathf.Abs(here.y - to.y) < .6f) { goal = i; break; }
+                for (int dx = -1; dx <= 1; dx++)
+                    for (int dz = -1; dz <= 1; dz++)
+                    {
+                        if (dx == 0 && dz == 0) continue;
+                        Vector3 probe = new Vector3(here.x + dx * GridStep, here.y, here.z + dz * GridStep);
+                        if (Flat(probe, from) > OffMeshReach + 2 || !StepNear(probe, out Vector3 floor, (dx != 0 && dz != 0 ? GridStep * 1.414f : GridStep) * 1.1f + .05f)) continue;
+                        var key = GridKey(floor);
+                        if (seen.Contains(key)) continue;
+                        if (!BodyClear(floor) || !LineClear(here + Vector3.up * .4f, floor + Vector3.up * .4f)) continue;
+                        seen.Add(key);
+                        at.Add(floor); parent.Add(i); cost.Add(cost[i] + Vector3.Distance(here, floor));
+                        open.Add((cost[at.Count - 1] + Vector3.Distance(floor, to), at.Count - 1));
+                    }
+            }
+            if (goal < 0)
+            {
+                int closest = 0;
+                for (int i = 1; i < at.Count; i++) if (Vector3.Distance(at[i], to) < Vector3.Distance(at[closest], to)) closest = i;
+                LastFloorSearch = $"{at.Count} footholds, open {open.Count}, closest {at[closest]} ({Vector3.Distance(at[closest], to):0.0} m from {to})";
+                return false;
+            }
+            var way = new List<Vector3>();
+            for (int i = goal; i >= 0; i = parent[i]) way.Add(at[i]);
+            way.Reverse();
+            // Straightened: from each point, the furthest of the next dozen it can walk to in a straight line.
+            var legs = new List<Vector3> { way[0] };
+            for (int k = 0; k < way.Count - 1;)
+            {
+                int next = k + 1;
+                for (int j = Mathf.Min(way.Count - 1, k + 12); j > k + 1; j--)
+                    if (Walkable(way[k], way[j], true)) { next = j; break; }
+                legs.Add(way[next]); k = next;
+            }
+            route = legs.ToArray();
+            return true;
+        }
+
+        private static (int, int, int) GridKey(Vector3 p) => (Mathf.RoundToInt(p.x / GridStep), Mathf.RoundToInt(p.z / GridStep), Mathf.FloorToInt(p.y / 1.2f));
+
+        private static bool BodyClear(Vector3 floor)
+        {
+            foreach (Collider c in Physics.OverlapCapsule(floor + Vector3.up * (.25f + DogRadius), floor + Vector3.up * (.9f - DogRadius), DogRadius, Solid, QueryTriggerInteraction.Ignore))
+                if (!Ignored(c)) return false;
+            return true;
+        }
+
+        private static bool LineClear(Vector3 a, Vector3 b)
+        {
+            foreach (RaycastHit hit in Physics.RaycastAll(a, b - a, Vector3.Distance(a, b), Solid, QueryTriggerInteraction.Ignore))
+                if (!Ignored(hit.collider)) return false;
+            return true;
+        }
+
         // Nothing solid at the dog's body height along the way, and floor under every step with no drop or wall of steps.
         // 'climb': up and down stairs, the body checked at each step's own height rather than the start's.
         private static bool Walkable(Vector3 a, Vector3 b, bool climb = false)
@@ -720,13 +845,35 @@ namespace K9Companion
             for (float d = .35f; d < length + .35f; d += .35f)
             {
                 Vector3 p = a + direction * Mathf.Min(d, length);
-                if (!FloorNear(new Vector3(p.x, y, p.z), .3f, out Vector3 floor)) return false;
+                if (!StepNear(new Vector3(p.x, y, p.z), out Vector3 floor)) return false;
                 y = floor.y;
                 foreach (Collider c in Physics.OverlapCapsule(floor + Vector3.up * (.25f + DogRadius), floor + Vector3.up * (.9f - DogRadius),
                                                               DogRadius, Solid, QueryTriggerInteraction.Ignore))
                     if (!Ignored(c)) return false;
             }
             return Mathf.Abs(y - b.y) < .5f;
+        }
+
+        // The next foothold on a way up or down: a stair, or the ramp a game's stairs are walked on (steep ones are 45
+        // degrees, which FloorNear, made for level floors, turns down), up to 45 cm higher or lower than the last.
+        // 'within': how far up or down it may be; a longer step on a 45-degree stair rises or drops more.
+        private static bool StepNear(Vector3 near, out Vector3 floor, float within = .45f)
+        {
+            floor = default; float bestGap = float.MaxValue;
+            // From well above, and again from just above: a look that starts inside a building's collision mesh (under a
+            // beam, a landing over the stair) passes through the floor without seeing it.
+            for (int look = 0; look < 2; look++)
+            {
+                float above = within + (look == 0 ? .6f : .15f);
+                foreach (RaycastHit hit in Physics.RaycastAll(near + Vector3.up * above, Vector3.down, above + within + .6f, Solid, QueryTriggerInteraction.Ignore))
+                {
+                    if (hit.normal.y < .6f || Ignored(hit.collider)) continue;
+                    float gap = Mathf.Abs(hit.point.y - near.y);
+                    if (gap <= within && gap < bestGap) { bestGap = gap; floor = hit.point; }
+                }
+                if (bestGap < float.MaxValue) break;
+            }
+            return bestGap < float.MaxValue;
         }
 
         // ---- wandering ----------------------------------------------------------------------------------------------

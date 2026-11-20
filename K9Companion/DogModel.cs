@@ -52,7 +52,7 @@ namespace K9Companion
         public static int ClipNumber(string name) => name == null ? -1 : Array.IndexOf(Required, name);
         public static string ClipName(int number) => number >= 0 && number < Required.Length ? Required[number] : null;
 
-        public static readonly string[] Required = { "Stand_00", "Loco_Walk", "Loco_Trot", "Loco_Run", "Loco_Sprint", "Sitting_00", "Trans_Stand_To_Sitting", "Trans_Sitting_To_Stand", "Loco_Walk_L", "Loco_Walk_R", "Loco_Trot_L", "Loco_Trot_R", "Loco_Run_L", "Loco_Run_R", "Loco_Sprint_L", "Loco_Sprint_R", "Trans_TurnL90", "Trans_TurnR90", "Loco_Sneak", "Loco_Sneak_L", "Loco_Sneak_R", "Stand_Sneak_00", "Loco_WalkSlow", "Loco_WalkSlow_L", "Loco_WalkSlow_R", "Stand_01", "Stand_02", "Sitting_01", "Sitting_02", "Lying_00", "Lying_01", "Lying_02", "Sleeping_01", "Trans_Stand_To_Lying", "Trans_Lying_To_Stand", "Trans_Lying_to_Sleeping", "Trans_Sleeping_to_Lying", "Death_Stand_L", "Death_Stand_R", "Death_Stand_L_Pose", "Death_Stand_R_Pose", "Hit_ChestL_Light", "Hit_ChestR_Light", "Hit_ChestL_Heavy", "Hit_ChestR_Heavy", "Attack_BiteL", "Attack_BiteR", "Agressive_01" };
+        public static readonly string[] Required = { "Stand_00", "Loco_Walk", "Loco_Trot", "Loco_Run", "Loco_Sprint", "Sitting_00", "Trans_Stand_To_Sitting", "Trans_Sitting_To_Stand", "Loco_Walk_L", "Loco_Walk_R", "Loco_Trot_L", "Loco_Trot_R", "Loco_Run_L", "Loco_Run_R", "Loco_Sprint_L", "Loco_Sprint_R", "Trans_TurnL90", "Trans_TurnR90", "Loco_Sneak", "Loco_Sneak_L", "Loco_Sneak_R", "Stand_Sneak_00", "Loco_WalkSlow", "Loco_WalkSlow_L", "Loco_WalkSlow_R", "Stand_01", "Stand_02", "Sitting_01", "Sitting_02", "Lying_00", "Lying_01", "Lying_02", "Sleeping_01", "Trans_Stand_To_Lying", "Trans_Lying_To_Stand", "Trans_Lying_to_Sleeping", "Trans_Sleeping_to_Lying", "Death_Stand_L", "Death_Stand_R", "Death_Stand_L_Pose", "Death_Stand_R_Pose", "Hit_ChestL_Light", "Hit_ChestR_Light", "Hit_ChestL_Heavy", "Hit_ChestR_Heavy", "Attack_BiteL", "Attack_BiteR", "Agressive_01", "Jump_Stand", "Jump_Trot", "Jump_Run" };
 
         private Transform[] bones;
         private Transform root;
@@ -196,6 +196,7 @@ namespace K9Companion
             foreach (string name in Required)
                 if (!clips.ContainsKey(name)) throw new InvalidDataException("Missing animation: " + name);
             visual.transform.localScale = Vector3.one * scale;
+            DogSnow.Add(root);
         }
 
         // One skinned mesh block (as written by tools/convert_blender.py and convert_jacket.py), bound to this skeleton.
@@ -443,6 +444,6 @@ namespace K9Companion
         }
 
         public void Dispose()
-        { foreach (var resource in resources) if (resource != null) UnityEngine.Object.Destroy(resource); resources.Clear(); }
+        { DogSnow.Remove(root); foreach (var resource in resources) if (resource != null) UnityEngine.Object.Destroy(resource); resources.Clear(); }
     }
 }

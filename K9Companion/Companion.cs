@@ -11,7 +11,7 @@ namespace K9Companion
 {
     public sealed partial class Companion : MonoBehaviour, IDogTarget
     {
-        private enum Stance { Stand, SitDown, Sitting, StandUp, Turn, LieDown, Lying, LieUp, SleepDown, Sleeping, Wake }
+        private enum Stance { Stand, SitDown, Sitting, StandUp, Turn, LieDown, Lying, LieUp, SleepDown, Sleeping, Wake, Jump }
 
         private const float Accel = 8f, SitAfter = 6f, LookAhead = 1.2f, TurnPlayback = 1.3f, HurriedTurn = 2.2f;
         // How hard it brakes for the spot it's going to (m/s2): usually, and at the end of a rush.
@@ -117,6 +117,8 @@ namespace K9Companion
         private void Tick(float dt)
         {
             Player player = CurrentPlayer;
+            // You're dead and playing as the dog (Companion.Control).
+            if (controlled) { TickControlled(dt, player); return; }
             if (!Plugin.Active.Value || (player != null && player.HealthController != null && !player.HealthController.IsAlive))
             { Cleanup(); failed = true; return; }
             if (player == null)
@@ -128,6 +130,7 @@ namespace K9Companion
 
             bool hideout = IsHideout;
             Vector3 ownerPosition = player.Transform.position;
+            if (!hideout) RecordTrail(ownerPosition);
             Vector3 target = ownerPosition;
             crouching = player.IsInPronePose || player.PoseLevel < 0.6f;
             Vector3 velocity = player.Velocity; velocity.y = 0;
@@ -147,6 +150,7 @@ namespace K9Companion
             }
 
             if (TickCombat(dt, player)) return;
+            if (Jumping) { TickJump(dt); return; }
             if (!RenameDialog.IsOpen && !player.IsInventoryOpened && Cursor.lockState == CursorLockMode.Locked) Commands(player, hideout);
             TickFeatures(dt, player, hideout);
             if (TickTreatment(dt, player)) return;
@@ -178,6 +182,8 @@ namespace K9Companion
             else if (toBed) { target = bed; tuning.Follow = .2f; }
             else if (toRoam) { target = roam; tuning.Follow = .3f; }
             float distance = Vector3.Distance(start, target);
+            // Following you, how far it has to walk to you: a floor up or down, or round a wall, you're further than you look.
+            if (attackTarget == null && !hideout) distance = WalkDistance(start, target, distance);
             float ownerDistance = Vector3.Distance(start, ownerPosition);
             float stop = tuning.Follow;
             band = Locomotion.Band(distance, band, tuning);
@@ -221,6 +227,8 @@ namespace K9Companion
             float desired = 0;
             if (following && stance == Stance.Stand)
             {
+                // Over a fence or off a ledge, when that's the way (Companion.Jump).
+                if (!hideout && TryJumpOnTheWay(start, target, stop, pace >= 0)) return;
                 if (pace >= 0) desired = pace;
                 else
                 {
@@ -301,6 +309,7 @@ namespace K9Companion
                     yaw = turnFrom + turnAngle * Curve(turnClip == "Trans_TurnL90" ? TurnL : TurnR, done ? 1 : model.Progress);
                     if (done) { stance = Stance.Stand; yawRate = 0; }
                     return;
+                case Stance.Jump: return;   // TickJump plays it
             }
             float s = shownSpeed;
             lean = Mathf.Lerp(lean, Mathf.Clamp(yawRate / 90f, -1, 1), Mathf.Min(1, 6 * dt));
@@ -379,12 +388,53 @@ namespace K9Companion
             { corners = path.corners; corner = 1; return; }
             // The bots' navmesh doesn't reach everywhere you can walk (upstairs in some buildings, small rooms): close by,
             // the dog goes over the floor itself, in straight legs as at home.
-            if (Flat(dog.transform.position, target) < OffMeshReach && Mathf.Abs(dog.transform.position.y - target.y) < 6
-                && HideoutRoute(dog.transform.position, target, out Vector3[] legs))
-            { corners = legs; corner = 1; legsRoute = true; nextPath = Time.time + .8f; pathExpires = Time.time + 2f; }
+            if (Flat(dog.transform.position, target) < OffMeshReach && Mathf.Abs(dog.transform.position.y - target.y) < 8)
+            {
+                // One or two straight legs if they'll do; otherwise a search over the floor, kept for longer (it's more work).
+                if (HideoutRoute(dog.transform.position, target, out Vector3[] legs))
+                { corners = legs; corner = 1; legsRoute = true; nextPath = Time.time + .8f; pathExpires = Time.time + 2f; }
+                else if (TrailRoute(dog.transform.position, target, out legs))
+                { corners = legs; corner = 1; legsRoute = true; nextPath = Time.time + .8f; pathExpires = Time.time + 3f; }
+                else if (FloorRoute(dog.transform.position, target, out legs))
+                { corners = legs; corner = 1; legsRoute = true; nextPath = Time.time + 1.2f; pathExpires = Time.time + 4f; }
+                else nextPath = Time.time + 1.5f;
+            }
         }
 
         private const float OffMeshReach = 20f;
+        private float walkDistance, nextWalkCheck;
+        private Vector3 walkTarget;
+        private readonly NavMeshPath walkPath = new NavMeshPath();
+
+        // The straight distance, or the walk there by the navmesh if that's longer: one stair flight above you (0.6 m
+        // across, 2 m up) it stopped and sat as if beside you. Re-measured twice a second, or as soon as you move.
+        private float WalkDistance(Vector3 from, Vector3 target, float straight)
+        {
+            if (Time.time >= nextWalkCheck || (target - walkTarget).sqrMagnitude > .25f)
+            {
+                nextWalkCheck = Time.time + .5f; walkTarget = target; walkDistance = 0;
+                if (NavMesh.SamplePosition(from, out NavMeshHit a, 1.5f, NavMesh.AllAreas) && NavMesh.SamplePosition(target, out NavMeshHit b, 2f, NavMesh.AllAreas)
+                    && NavMesh.CalculatePath(a.position, b.position, NavMesh.AllAreas, walkPath) && walkPath.status == NavMeshPathStatus.PathComplete)
+                {
+                    Vector3[] c = walkPath.corners;
+                    for (int i = 1; i < c.Length; i++) walkDistance += Vector3.Distance(c[i - 1], c[i]);
+                    walkDistance += Flat(b.position, target);
+                }
+            }
+            // Off the navmesh, on a route of its own that ends at you (down a steep stair the navmesh leaves out): what's
+            // left of that route, and how far above or below you it still is. It sat on the stairs over your head.
+            if (walkDistance == 0 && legsRoute && corner < corners.Length)
+            {
+                Vector3 end = corners[corners.Length - 1];
+                if (Flat(end, target) < 1.5f && Mathf.Abs(end.y - target.y) < .8f)
+                {
+                    float left = 0; Vector3 p = from;
+                    for (int i = corner; i < corners.Length; i++) { left += Vector3.Distance(p, corners[i]); p = corners[i]; }
+                    return Mathf.Max(straight, left + Flat(p, target) + Mathf.Abs(from.y - target.y));
+                }
+            }
+            return Mathf.Max(straight, walkDistance);
+        }
         private bool legsRoute;   // following a floor route off the navmesh (raid)
 
         // A dog runs the way it faces. Steer turns it towards a point a little way along the path, so it starts round a
@@ -411,8 +461,22 @@ namespace K9Companion
             Vector3 heading = Quaternion.Euler(0, yaw, 0) * Vector3.forward;
             if (Vector3.Angle(heading, toCorner) > 70) { MoveAlongPath(step); return; }   // facing well off (a tight turn): keep to the path
             Vector3 next = pos + heading * step;
-            if (NavMesh.Raycast(pos, next, out _, NavMesh.AllAreas)) { MoveAlongPath(step); return; }
+            // Down (or up) towards the corner's height as it goes: kept level, it walked out flat over a steep flight of
+            // stairs going down, off the end of the ground check, and stood in the air.
+            next.y = Mathf.Lerp(pos.y, corners[corner].y, Mathf.Clamp01(step / left));
+            if (NavMesh.Raycast(pos, next, out _, NavMesh.AllAreas) || !GroundIsTheWay(next)) { MoveAlongPath(step); return; }
             Place(next, true);
+        }
+
+        // The navmesh is a sheet laid over stairs and landings; cutting a corner, the ground under the next step must be
+        // where the sheet is. At a switchback it cut out over the edge onto a beam beside the flight below (and stood there
+        // two metres over the steps), or off the top turn down onto a platform underneath.
+        private bool GroundIsTheWay(Vector3 next)
+        {
+            if (!NavMesh.SamplePosition(next, out NavMeshHit sheet, 1f, NavMesh.AllAreas)) return false;
+            float top = Mathf.Max(next.y, dog.transform.position.y) + .5f;
+            return Physics.Raycast(new Vector3(next.x, top, next.z), Vector3.down, out RaycastHit hit, top - sheet.position.y + .6f, groundMask, QueryTriggerInteraction.Ignore)
+                   && Mathf.Abs(hit.point.y - sheet.position.y) < .4f;
         }
 
         // Straight along the path, corner to corner.
@@ -426,7 +490,10 @@ namespace K9Companion
                 if (len < 0.05f) { corner++; continue; }
                 float d = Mathf.Min(step, len);
                 Vector3 next = pos + flat / len * d;
-                next.y = Mathf.Lerp(pos.y, corners[corner].y, d / len);
+                // Up or down no steeper than a steep stair: two corners of a switchback can be almost one above the other,
+                // and it went 1.6 m up in one step. The ground under it decides the rest.
+                float rise = Mathf.Lerp(pos.y, corners[corner].y, d / len) - pos.y;
+                next.y = pos.y + Mathf.Clamp(rise, -(d * 1.5f + .05f), d * 1.5f + .05f);
                 Place(next, true);
                 step -= d;
             }
@@ -435,8 +502,17 @@ namespace K9Companion
         // Walking, the body rides over steps and rubble rather than jumping to each new height (it went up stairs in jerks).
         private void Place(Vector3 p, bool walking = false)
         {
-            if (Physics.Raycast(p + Vector3.up * 0.5f, Vector3.down, out RaycastHit hit, 1.5f, groundMask, QueryTriggerInteraction.Ignore))
+            // Walking, the floor is looked for from above both where it is and where it's going: going down stairs it's
+            // above the next step, going up it's a little below it (the height eases in), and a look from under a step
+            // passes through it to the floor beneath.
+            float from = (walking ? Mathf.Max(p.y, dog.transform.position.y) : p.y) + 0.5f;
+            if (Physics.Raycast(new Vector3(p.x, from, p.z), Vector3.down, out RaycastHit hit, from - p.y + 1f, groundMask, QueryTriggerInteraction.Ignore))
                 p.y = hit.point.y;
+            // Heading down a slope too steep for that (a 45-degree stair): the ground further below, rather than walking on
+            // air. Only downhill, looked for from above its own feet, so never through a floor it stands on.
+            else if (walking && p.y < dog.transform.position.y - .05f
+                     && Physics.Raycast(new Vector3(p.x, from, p.z), Vector3.down, out hit, from - p.y + 3f, groundMask, QueryTriggerInteraction.Ignore))
+                p.y = Mathf.Max(hit.point.y, dog.transform.position.y - 7f * Time.deltaTime);   // down to it quickly, not in one frame
             // On its kennel bed (raised on the dog house's or the military kennel's floor): on top of it.
             if (decor != null && decor.OnBed(p, out float bed)) p.y = Mathf.Max(p.y, bed);
             if (walking && !IsHideout)
@@ -517,6 +593,7 @@ namespace K9Companion
             if (look.x * look.x + look.z * look.z > 0.01f) yaw = Mathf.Atan2(look.x, look.z) * Mathf.Rad2Deg;
             dog.transform.rotation = Quaternion.Euler(0, yaw, 0);
             if (stance == Stance.Turn) stance = Stance.Stand;
+            CancelJump();
             corners = Array.Empty<Vector3>(); corner = 0; speed = 0; shownSpeed = 0; yawRate = 0; lean = 0;
             progressPoint = point; lastProgress = Time.time; nextPath = 0;
         }

@@ -95,7 +95,7 @@ namespace K9Companion
                 var owner = Dog?.Owner;
                 Camera view = CameraManager.Instance?.Camera;
                 bool show = Plugin.HealthBar.Value && Dog != null && Dog.CanBeHurt && owner != null && owner.HealthController != null
-                            && owner.HealthController.IsAlive && !owner.IsInventoryOpened && view != null;
+                            && (owner.HealthController.IsAlive || Companion.Controlling) && !owner.IsInventoryOpened && view != null;
                 bool onHud = Plugin.HealthBarAt.Value == HealthBarPlace.UnderYourHealth;
                 // Through the viewport, so it lands right whatever the game renders at (resolution scaling, upscalers).
                 Vector3 viewport = show && !onHud ? view.WorldToViewportPoint(Dog.OverheadPoint) : Vector3.zero;

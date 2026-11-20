@@ -13,7 +13,10 @@ using EFT.UI.Health;
 using EFT.UI;
 using EFT;
 using HarmonyLib;
+using Newtonsoft.Json.Linq;
+using SPT.Common.Http;
 using TMPro;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using UnityEngine;
 
@@ -888,8 +891,25 @@ namespace K9Companion
         private void OpenLocker(string template)
         {
             CompoundItem locker = DogGear.Locker(profile, template);
-            if (locker == null) { Status("The locker is set up the next time you start the game."); return; }
+            if (locker == null) { Status(SetUpLockers()); return; }
             ItemUiContext.Instance?.OpenItem(locker, ContextOf(locker));
+        }
+
+        // The locker isn't in the profile the game loaded: the server mod sets the lockers up (or puts a stray one back) now
+        // and says what it did. The game reads the profile only at start, so a locker made now opens after a restart.
+        private static string SetUpLockers()
+        {
+            string reply = null;
+            try { reply = RequestHandler.PostJson("/k9companion/k9/lockers", "{}"); }
+            catch (Exception e) { Plugin.Log.LogWarning("Kennel lockers: " + e.Message); }
+            JObject answer = null;
+            try { if (!string.IsNullOrEmpty(reply)) answer = JObject.Parse(reply); }
+            catch (Exception) { }
+            Plugin.Log.LogInfo("Kennel lockers missing from the profile; server says: " + (reply ?? "nothing"));
+            if (answer == null || (answer["ok"] == null && answer["problem"] == null))
+                return "The server mod didn't answer: update K9 Companion's server mod and restart the SPT server.";
+            if (answer["ok"]?.Value<bool>() == true) return "The kennel lockers are ready: restart the game to open them.";
+            return "The kennel lockers couldn't be set up (" + (answer["problem"]?.Value<string>() ?? "unknown") + "). The SPT server window says more.";
         }
 
         // A window on an item goes by the item's own context, as when you open it from your stash.
@@ -1059,7 +1079,7 @@ namespace K9Companion
                 }
                 shownTab = dog;
                 dog.gameObject.SetActive(true);
-                Place(dog, template, tabs);
+                Place(dog, template, tabs, __instance._backButton != null ? __instance._backButton.transform as RectTransform : null);
                 dog.SetInteractable(true);
                 dog.UpdateVisual(selected: false);
                 dog.Init(new DogTabController(__instance, gear));
@@ -1072,13 +1092,17 @@ namespace K9Companion
             catch (Exception e) { Plugin.Log.LogError("Couldn't add the DOG tab: " + e); }
         }
 
+        /// <summary>The character screen's tab group while it's open (the DOG tab is hooked into it).</summary>
+        internal static TabGroup Group => hookedGroup;
+
         // The tab bar places its tabs by hand (no layout group), so a copy lands exactly on the tab it was copied from and
         // hides underneath it. It goes one place right of the rightmost tab, by the same spacing as the game's last two;
-        // other mods add tabs to the same bar (Weekend Drops Continued's daily quests), and DogTabSpot keeps it clear of those.
-        private static void Place(Tab dog, Tab template, IReadOnlyDictionary<EInventoryTab, Tab> tabs)
+        // other mods add tabs to the same bar (Weekend Drops Continued's daily quests, wrist accessories...), and
+        // DogTabSpot keeps it clear of those. However many there are, the bar scrolls (TabScroll), so none is ever off the
+        // screen or under the back button.
+        private static void Place(Tab dog, Tab template, IReadOnlyDictionary<EInventoryTab, Tab> tabs, RectTransform back)
         {
             var bar = template.transform.parent;
-            DogTabSpot.Unsqueeze();   // measured at the game's own widths
             var layout = bar.GetComponent<UnityEngine.UI.LayoutGroup>();
             if (layout != null && layout.enabled) { Report(dog, "by the tab bar's layout"); return; }
             var to = (RectTransform)dog.transform; var from = (RectTransform)template.transform;
@@ -1094,10 +1118,9 @@ namespace K9Companion
             var spot = dog.GetComponent<DogTabSpot>() ?? dog.gameObject.AddComponent<DogTabSpot>();
             spot.Step = step;
             spot.After = own;
-            spot.First = game.FirstOrDefault() ?? from;
-            spot.Game = game;
-            spot.Full = to.sizeDelta;
             spot.MoveToFree();
+            try { TabScroll.Fit(bar, game.FirstOrDefault() ?? from, step, back); }
+            catch (Exception e) { Plugin.Log.LogWarning("The tab bar couldn't be made to scroll (the tabs stay as they are): " + e.Message); }
             Report(dog, $"at {to.anchoredPosition}, the first free place right of {own.name}");
         }
 
@@ -1163,146 +1186,60 @@ namespace K9Companion
     }
 
     /// <summary>
-    /// Keeps the DOG tab clear of tabs other mods put on the same bar, whenever they add them, and of the screen's own
-    /// buttons (the back button at the top right): it takes the first free place right of the game's own tabs, and
-    /// left of OVERALL if the bar is full up to the edge of the screen. Free means on the screen and not overlapping any
-    /// other tab or button, measured on screen rather than by position numbers, since the back button and other mods'
-    /// tabs aren't anchored like the game's tabs.
+    /// Keeps the DOG tab clear of tabs other mods put on the same bar, whenever they add them: it takes the first free
+    /// place right of the game's own tabs. The bar scrolls (TabScroll), so it never has to squeeze in anywhere else.
     /// </summary>
     internal sealed class DogTabSpot : MonoBehaviour
     {
         internal float Step;
-        internal RectTransform After, First;
-        internal List<RectTransform> Game = new List<RectTransform>();
-        internal Vector2 Full;
-        // The game's tabs as they were before they were narrowed to make room (smaller window or resolution).
-        private static readonly Dictionary<RectTransform, (Vector2 at, Vector2 size)> originals = new Dictionary<RectTransform, (Vector2, Vector2)>();
-        private static readonly float[] Squeezes = { .9f, .85f, .8f };
+        internal RectTransform After;
         private float nextCheck;
         private static readonly Vector3[] Corners = new Vector3[4];
 
-        // In screen pixels, so things on different canvases compare: the back button isn't on the tab bar's canvas.
-        private static Rect WorldRect(RectTransform t)
+        // In screen pixels, so tabs that aren't anchored like the game's compare too.
+        internal static Rect WorldRect(RectTransform t)
         {
             t.GetWorldCorners(Corners);
-            Canvas canvas = t.GetComponentInParent<Canvas>();
-            Camera cam = canvas == null || canvas.rootCanvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.rootCanvas.worldCamera;
+            Camera cam = CameraOf(t);
             Vector2 a = RectTransformUtility.WorldToScreenPoint(cam, Corners[0]), b = RectTransformUtility.WorldToScreenPoint(cam, Corners[2]);
             return Rect.MinMaxRect(Mathf.Min(a.x, b.x), Mathf.Min(a.y, b.y), Mathf.Max(a.x, b.x), Mathf.Max(a.y, b.y));
         }
 
-        // The tab's own rect, a little in from its edges so neighbours that only touch it don't count.
-        private Rect Inner()
+        internal static Camera CameraOf(Transform t)
         {
-            Rect mine = WorldRect((RectTransform)transform);
-            float dx = mine.width * .15f, dy = mine.height * .15f;
-            return Rect.MinMaxRect(mine.xMin + dx, mine.yMin + dy, mine.xMax - dx, mine.yMax - dy);
+            Canvas canvas = t.GetComponentInParent<Canvas>();
+            return canvas == null || canvas.rootCanvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.rootCanvas.worldCamera;
         }
 
-        private bool Blocks(Transform other, Rect inner)
-        {
-            if (!(other is RectTransform rect) || other == transform || other.IsChildOf(transform) || transform.IsChildOf(other)) return false;
-            if (!other.gameObject.activeInHierarchy) return false;
-            // Faded out (a screen behind this one, kept active but not shown).
-            foreach (CanvasGroup g in other.GetComponentsInParent<CanvasGroup>())
-            {
-                if (g.alpha < .05f) return false;
-                if (g.ignoreParentGroups) break;
-            }
-            Rect theirs = WorldRect(rect);
-            // Backgrounds, panels and scroll areas aren't in the way; only things about the size of a tab or a button.
-            if (theirs.width > inner.width * 4 || theirs.height > inner.height * 4 || theirs.width < 1 || theirs.height < 1) return false;
-            return theirs.Overlaps(inner);
-        }
-
-        /// <summary>The tab or button the DOG tab is on top of, or null.</summary>
+        /// <summary>The tab on the same bar the DOG tab is on top of, or null.</summary>
         internal Transform Blocker()
         {
-            Rect inner = Inner();
+            Rect mine = WorldRect((RectTransform)transform);
+            // A little in from its edges, so neighbours that only touch it don't count.
+            Rect inner = Rect.MinMaxRect(mine.xMin + mine.width * .15f, mine.yMin + mine.height * .15f, mine.xMax - mine.width * .15f, mine.yMax - mine.height * .15f);
             Transform bar = transform.parent;
             for (int i = 0; i < bar.childCount; i++)
-                if (Blocks(bar.GetChild(i), inner)) return bar.GetChild(i);
-            // Every button on screen, whatever canvas it's on (the back button at the top right has its own).
-            foreach (Selectable button in Selectable.allSelectablesArray)
-                if (button != null && button.isActiveAndEnabled && Blocks(button.transform, inner)) return button.transform;
+            {
+                if (!(bar.GetChild(i) is RectTransform other) || other == transform || !other.gameObject.activeInHierarchy) continue;
+                Rect theirs = WorldRect(other);
+                // Only things about the size of a tab: not a background or a decoration.
+                if (theirs.width > inner.width * 4 || theirs.height > inner.height * 4 || theirs.width < 1 || theirs.height < 1) continue;
+                if (theirs.Overlaps(inner)) return other;
+            }
             return null;
-        }
-
-        private bool OnScreen()
-        {
-            Rect screen = new Rect(0, 0, Screen.width, Screen.height), mine = WorldRect((RectTransform)transform);
-            float slack = mine.width * .05f;
-            return mine.xMin >= screen.xMin - slack && mine.xMax <= screen.xMax + slack && mine.yMin >= screen.yMin - slack && mine.yMax <= screen.yMax + slack;
-        }
-
-        private bool TryAt(float x, float y)
-        {
-            ((RectTransform)transform).anchoredPosition = new Vector2(x, y);
-            return OnScreen() && Blocker() == null;
         }
 
         internal void MoveToFree()
         {
             if (Step < 1 || After == null || transform.parent == null) return;
             var me = (RectTransform)transform;
-            if (Full.x < 1) Full = me.sizeDelta;
-            Unsqueeze();
-            me.sizeDelta = Full;
-            if (FreeSpot(Step)) return;
-            // In a smaller window (or at a lower resolution) the bar runs into the back button, more so with other mods'
-            // tabs on it: the game's tabs, and the DOG tab with them, are made a little narrower until it fits.
-            foreach (float f in Squeezes)
+            for (int i = 1; i <= 24; i++)
             {
-                Squeeze(f);
-                if (FreeSpot(Step * f)) { Plugin.Log.LogInfo($"DOG tab: no room on the tab bar, so the tabs are {f * 100:0}% as wide."); return; }
+                me.anchoredPosition = new Vector2(After.anchoredPosition.x + i * Step, After.anchoredPosition.y);
+                if (Blocker() == null) return;
             }
-            Unsqueeze();
-            me.sizeDelta = Full;
             // Nowhere free: right after the game's tabs, where it always used to go.
             me.anchoredPosition = new Vector2(After.anchoredPosition.x + Step, After.anchoredPosition.y);
-        }
-
-        private bool FreeSpot(float step)
-        {
-            float y = After.anchoredPosition.y;
-            float right = After.anchoredPosition.x, left = (First != null ? First : After).anchoredPosition.x;
-            for (int i = 1; i <= 16; i++)
-            {
-                if (TryAt(right + i * step, y)) return true;
-                if (!OnScreen()) break;
-            }
-            for (int i = 1; i <= 4; i++)
-            {
-                if (TryAt(left - i * step, y)) return true;
-                if (!OnScreen()) break;
-            }
-            return false;
-        }
-
-        // The game's tabs at f of their width and spacing, from where the first one starts; the DOG tab likewise.
-        private void Squeeze(float f)
-        {
-            if (Game.Count == 0) return;
-            foreach (RectTransform t in Game)
-                if (t != null && !originals.ContainsKey(t)) originals[t] = (t.anchoredPosition, t.sizeDelta);
-            RectTransform first = First != null && originals.ContainsKey(First) ? First : Game[0];
-            float origin = originals[first].at.x;
-            foreach (RectTransform t in Game)
-            {
-                if (t == null) continue;
-                var (at, size) = originals[t];
-                t.anchoredPosition = new Vector2(origin + (at.x - origin) * f, at.y);
-                t.sizeDelta = new Vector2(size.x * f, size.y);
-            }
-            ((RectTransform)transform).sizeDelta = new Vector2(Full.x * f, Full.y);
-        }
-
-        /// <summary>The game's tabs back at their own widths and places.</summary>
-        internal static void Unsqueeze()
-        {
-            foreach (var pair in originals)
-                if (pair.Key != null) { pair.Key.anchoredPosition = pair.Value.at; pair.Key.sizeDelta = pair.Value.size; }
-            originals.Clear();
         }
 
         private void LateUpdate()
@@ -1310,12 +1247,199 @@ namespace K9Companion
             if (Step < 1 || After == null || Time.unscaledTime < nextCheck) return;
             nextCheck = Time.unscaledTime + .25f;
             Transform other = Blocker();
-            if (other == null && OnScreen()) return;
-            Vector2 was = ((RectTransform)transform).anchoredPosition;
+            if (other == null) return;
             MoveToFree();
-            Vector2 now = ((RectTransform)transform).anchoredPosition;
-            if (now != was)
-                Plugin.Log.LogInfo($"DOG tab moved to {now}: {(other != null ? other.name + " was on top of it" : "it was off the screen")}.");
+            Plugin.Log.LogInfo($"DOG tab moved to {((RectTransform)transform).anchoredPosition}: {other.name} was on top of it.");
+        }
+    }
+
+    /// <summary>
+    /// The character screen's tab bar, scrolling sideways when it holds more tabs than fit (other mods add their own:
+    /// wrist accessories, weekend drops and so on). The tabs go into a strip inside the bar that ends short of the
+    /// screen's back button and shows only what's inside it; the mouse wheel over the tabs, or the arrows at its right end
+    /// when there's more than fits, slides them along. The bar itself, and every tab, stay as they are.
+    /// </summary>
+    internal sealed class TabScroll : MonoBehaviour, IScrollHandler
+    {
+        private const string ViewName = "K9 tab scroll", ContentName = "K9 tab strip";
+        private RectTransform view, content, bar, first, back;
+        private float offset, step = 100, nextCheck, contentLeft = float.MaxValue, contentRight;
+        private Vector2 home;
+        private GameObject arrows;
+        private Tab revealed;
+        private static readonly Vector3[] Corners = new Vector3[4];
+
+        /// <summary>
+        /// Puts the tabs in the scrolling strip (the first time) and fits it to the screen as it is now. 'tabs' is what the
+        /// tabs are in: the bar the first time, the strip after that.
+        /// </summary>
+        internal static void Fit(Transform tabs, RectTransform firstTab, float step, RectTransform backButton)
+        {
+            TabScroll scroll = tabs.name == ContentName ? tabs.parent.GetComponent<TabScroll>() : null;
+            if (scroll == null)
+            {
+                var bar = (RectTransform)tabs;
+                var viewObject = new GameObject(ViewName, typeof(RectTransform));
+                var view = (RectTransform)viewObject.transform;
+                view.SetParent(bar, false);
+                view.SetSiblingIndex(firstTab.GetSiblingIndex());
+                view.anchorMin = view.anchorMax = view.pivot = Vector2.zero;
+                viewObject.AddComponent<LayoutElement>().ignoreLayout = true;
+                viewObject.AddComponent<RectMask2D>();
+                // Catches the mouse wheel between and around the tabs (and, being clear, shows nothing).
+                var catcher = viewObject.AddComponent<Image>(); catcher.color = Color.clear;
+                scroll = viewObject.AddComponent<TabScroll>();
+                scroll.view = view; scroll.bar = bar;
+                scroll.FitView(firstTab);
+                // The strip is the bar's double (its size and place), so every tab keeps its numbers in it.
+                var contentObject = new GameObject(ContentName, typeof(RectTransform));
+                var content = (RectTransform)contentObject.transform;
+                content.SetParent(view, false);
+                contentObject.AddComponent<LayoutElement>().ignoreLayout = true;
+                content.anchorMin = content.anchorMax = Vector2.zero; content.pivot = bar.pivot; content.sizeDelta = bar.rect.size;
+                content.position = bar.position; content.localScale = Vector3.one; content.localRotation = Quaternion.identity;
+                scroll.content = content;
+                foreach (Tab tab in bar.GetComponentsInChildren<Tab>(true).Where(t => t.transform.parent == bar).ToList())
+                    tab.transform.SetParent(content, true);
+                scroll.home = content.anchoredPosition;
+                scroll.MakeArrows(firstTab);
+                Plugin.Log.LogInfo($"Tab bar '{bar.name}' scrolls now: {content.childCount} tab(s) in a strip {view.rect.width:0} wide.");
+            }
+            scroll.first = firstTab; scroll.step = step; scroll.back = backButton; scroll.revealed = null;
+            scroll.Refit(0);
+        }
+
+        // The strip's window: from the first tab to the first button right of it on its row (the back button), or the
+        // screen's edge.
+        private void FitView(RectTransform firstTab)
+        {
+            Rect row = DogTabSpot.WorldRect(firstTab);
+            float right = Screen.width - 4;
+            // The screen's BACK button is the game's own kind of button, not a Unity one: it's measured by name.
+            if (back != null && back.gameObject.activeInHierarchy) right = Stop(back, row, right, true);
+            foreach (Selectable button in Selectable.allSelectablesArray)
+                if (button != null && button.isActiveAndEnabled && !button.transform.IsChildOf(bar) && button.transform is RectTransform rect) right = Stop(rect, row, right, false);
+            Camera cam = DogTabSpot.CameraOf(bar);
+            float pad = row.height * .3f;
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(bar, new Vector2(row.xMin - 2, row.yMin - pad), cam, out Vector2 low);
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(bar, new Vector2(Mathf.Max(right, row.xMax), row.yMax + pad), cam, out Vector2 high);
+            // The tabs stay where they are on screen while their window moves.
+            Vector3 keep = content != null ? content.position : Vector3.zero;
+            view.anchoredPosition = low - bar.rect.min;
+            view.sizeDelta = high - low;
+            if (content != null) content.position = keep;
+        }
+
+        // Where the window has to end for something on the tabs' row, right of the first tab (and not part of the bar).
+        private float Stop(RectTransform thing, Rect row, float right, bool withLabel)
+        {
+            Rect r = DogTabSpot.WorldRect(thing);
+            // Its visible part too: a button's label can stick out of its own rect (BACK's does).
+            if (withLabel) foreach (Graphic g in thing.GetComponentsInChildren<Graphic>())
+                if (g.isActiveAndEnabled && g.color.a > .05f) { Rect gr = DogTabSpot.WorldRect(g.rectTransform); if (gr.width > 0 && gr.width < row.width * 4) r = Rect.MinMaxRect(Mathf.Min(r.xMin, gr.xMin), Mathf.Min(r.yMin, gr.yMin), Mathf.Max(r.xMax, gr.xMax), Mathf.Max(r.yMax, gr.yMax)); }
+            if (r.width < 1 || r.height < 1 || r.width > row.width * 4 || r.yMax < row.yMin + row.height * .25f || r.yMin > row.yMax - row.height * .25f) return right;
+            return r.xMin > row.xMin + row.width * .5f ? Mathf.Min(right, r.xMin - 6) : right;
+        }
+
+        // Fits the window again (the screen may have changed, or still be sliding in), then scrolls back to 'keep'.
+        private void Refit(float keep)
+        {
+            if (view == null || content == null || first == null) return;
+            content.anchoredPosition = home;
+            offset = 0;
+            FitView(first);
+            home = content.anchoredPosition;
+            Measure();
+            Scroll(keep);
+        }
+
+        // Where the tabs reach, left and right, in the window's own units as if not scrolled; the arrows show when they
+        // don't all fit.
+        private void Measure()
+        {
+            contentLeft = float.MaxValue; contentRight = float.MinValue;
+            for (int i = 0; i < content.childCount; i++)
+            {
+                if (!(content.GetChild(i) is RectTransform tab) || !tab.gameObject.activeSelf) continue;
+                tab.GetWorldCorners(Corners);
+                float a = view.InverseTransformPoint(Corners[0]).x - offset, b = view.InverseTransformPoint(Corners[2]).x - offset;
+                contentLeft = Mathf.Min(contentLeft, Mathf.Min(a, b)); contentRight = Mathf.Max(contentRight, Mathf.Max(a, b));
+            }
+            bool more = contentLeft < float.MaxValue && contentRight - contentLeft > view.rect.width + 1;
+            if (arrows != null && arrows.activeSelf != more) arrows.SetActive(more);
+            Scroll(0);
+        }
+
+        private float ArrowsWidth => arrows != null && arrows.activeSelf ? ((RectTransform)arrows.transform).rect.width + 2 : 0;
+
+        // Slides the tabs by 'by' (negative brings in the ones on the right), never past either end.
+        private void Scroll(float by)
+        {
+            if (contentLeft == float.MaxValue) return;
+            float least = Mathf.Min(0, view.rect.width - ArrowsWidth - contentRight), most = Mathf.Max(0, -contentLeft);
+            offset = Mathf.Clamp(offset + by, least, most);
+            content.anchoredPosition = home + new Vector2(offset, 0);
+        }
+
+        public void OnScroll(PointerEventData eventData)
+        {
+            Vector2 wheel = eventData.scrollDelta;
+            float by = Mathf.Abs(wheel.y) >= Mathf.Abs(wheel.x) ? wheel.y : -wheel.x;
+            if (Mathf.Abs(by) > .01f) Scroll(Mathf.Sign(by) * step);
+        }
+
+        // Two small arrows at the window's right end, over the tabs: shown only when there's more than fits.
+        private void MakeArrows(RectTransform like)
+        {
+            arrows = new GameObject("K9 tab arrows", typeof(RectTransform));
+            var box = (RectTransform)arrows.transform;
+            box.SetParent(view, false);
+            float h = view.rect.height, w = Mathf.Max(18, like.rect.height * .55f);
+            box.anchorMin = box.anchorMax = box.pivot = new Vector2(1, .5f);
+            box.anchoredPosition = Vector2.zero;
+            box.sizeDelta = new Vector2(w * 2 + 2, h);
+            TMP_FontAsset font = like.GetComponentInChildren<TMP_Text>(true)?.font;
+            Arrow(box, "◀", 0, w, h, font, () => Scroll(step));
+            Arrow(box, "▶", w + 2, w, h, font, () => Scroll(-step));
+            arrows.SetActive(false);
+        }
+
+        private static void Arrow(RectTransform box, string glyph, float x, float w, float h, TMP_FontAsset font, Action click)
+        {
+            var go = new GameObject("K9 tab arrow", typeof(RectTransform));
+            var r = (RectTransform)go.transform;
+            r.SetParent(box, false);
+            r.anchorMin = r.anchorMax = r.pivot = new Vector2(0, .5f);
+            r.anchoredPosition = new Vector2(x, 0); r.sizeDelta = new Vector2(w, h);
+            var back = go.AddComponent<Image>(); back.color = new Color(.07f, .07f, .07f, .92f);
+            var button = go.AddComponent<Button>(); button.targetGraphic = back;
+            button.onClick.AddListener(() => click());
+            var label = new GameObject("Label", typeof(RectTransform)).AddComponent<TextMeshProUGUI>();
+            label.rectTransform.SetParent(r, false);
+            label.rectTransform.anchorMin = Vector2.zero; label.rectTransform.anchorMax = Vector2.one; label.rectTransform.sizeDelta = Vector2.zero;
+            if (font != null) label.font = font;
+            label.text = glyph; label.fontSize = Mathf.Max(10, h * .34f); label.alignment = TextAlignmentOptions.Center;
+            label.color = new Color(.78f, .78f, .74f); label.raycastTarget = false;
+        }
+
+        private void LateUpdate()
+        {
+            if (content == null || Time.unscaledTime < nextCheck) return;
+            nextCheck = Time.unscaledTime + .3f;
+            // Tabs other mods add a moment later; the screen settling after it opens.
+            Refit(offset);
+            // The tab you're on is always in view.
+            Tab selected = DogTab.Group?._selectedTab;
+            if (selected != null && selected != revealed && selected.transform.parent == content) { revealed = selected; Reveal((RectTransform)selected.transform); }
+        }
+
+        private void Reveal(RectTransform tab)
+        {
+            tab.GetWorldCorners(Corners);
+            float a = view.InverseTransformPoint(Corners[0]).x, b = view.InverseTransformPoint(Corners[2]).x;
+            float left = Mathf.Min(a, b), right = Mathf.Max(a, b), room = view.rect.width - ArrowsWidth;
+            if (left < 0) Scroll(-left);
+            else if (right > room) Scroll(room - right);
         }
     }
 }

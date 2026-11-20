@@ -25,6 +25,8 @@ public sealed class BagRecord
     // The dog was killed and you took its gear off it (jacket into your own gear, head gear and camera with it): if you
     // get out alive it comes home with you and goes back on the dog.
     [JsonPropertyName("gearTaken")] public bool GearTaken { get; set; }
+    // You were killed and played the dog out through an extract: its jacket (and what's in it) and its kit come home.
+    [JsonPropertyName("dogExtracted")] public bool DogExtracted { get; set; }
     [JsonPropertyName("recordedAt")] public long RecordedAt { get; set; }
     // Once a profile has had a jacket the dog never gets another free one; lost jackets are bought from Dr. Yang.
     [JsonPropertyName("firstJacketGiven")] public bool FirstJacketGiven { get; set; }
@@ -153,6 +155,21 @@ public sealed class BagKeeper(ISptLogger<BagKeeper> logger, ProfileHelper profil
         return Ok;
     }
 
+    // You died and got the dog out (controlling it): its gear is kept although you were killed.
+    public string DogExtracted(MongoId sessionId)
+    {
+        PmcData? pmc = profiles.GetPmcProfile(sessionId);
+        if (pmc == null) return Refused;
+        BagRecord record = Load(pmc);
+        if (record.DogDied) return Refused;
+        if (record.InRaid || record.KitIds is { Count: > 0 })
+        {
+            record.DogExtracted = true; Save(pmc, record);
+            logger.Info("[K9Companion] The dog got out on its own: its gear comes home.");
+        }
+        return Ok;
+    }
+
     // A downed dog is reported as dead at once, so that a raid ending or a crash counts as that; this takes it back.
     public string DogRevived(MongoId sessionId)
     {
@@ -272,17 +289,52 @@ public sealed class BagKeeper(ISptLogger<BagKeeper> logger, ProfileHelper profil
     /// The kennel's two lockers, hidden containers in the quest stash like the gear holder (the DOG tab opens them once
     /// the kennel is built far enough). Created once per owner; their contents stay at home during raids.
     /// </summary>
-    public void EnsureLockers(PmcData pmc)
+    public LockerReport EnsureLockers(PmcData pmc)
     {
+        var report = new LockerReport();
         List<Item> items = pmc.Inventory!.Items!;
+        string? questStash = pmc.Inventory.QuestStashItems?.ToString();
+        if (questStash == null || !items.Any(i => i.Id.ToString() == questStash))
+        {
+            report.Problem = "the profile has no hidden quest stash";
+            logger.Warning("[K9Companion] Can't set up the kennel lockers: " + report.Problem + ".");
+            return report;
+        }
         foreach (MongoId template in new[] { K9Ids.ArmourLocker, K9Ids.PremiumLocker })
         {
-            if (items.Any(i => i.Template == template)) continue;
-            var locker = new Item { Id = new MongoId(), Template = template };
-            items.Add(locker);
-            if (Place(pmc, locker.Id, pmc.Inventory.QuestStashItems)) logger.Info("[K9Companion] Kennel locker set up.");
-            else { items.Remove(locker); logger.Warning("[K9Companion] No room for a kennel locker yet; trying again next game start."); }
+            List<Item> lockers = items.Where(i => i.Template == template).ToList();
+            if (lockers.Any(l => l.ParentId == questStash)) { report.Ready++; continue; }
+            // A locker that isn't in the quest stash (another mod or a profile edit moved it, or what it sat in is gone)
+            // is one the DOG tab can't see: it goes back, with what's in it. Only with none at all is a new one made.
+            if (lockers.Count > 0)
+            {
+                Item locker = lockers[0];
+                string? parent = locker.ParentId, slot = locker.SlotId;
+                var was = locker.Location;
+                locker.Location = null;
+                if (Place(pmc, locker.Id, pmc.Inventory.QuestStashItems)) { report.Ready++; report.Moved++; logger.Info("[K9Companion] A kennel locker was outside its hidden stash; put back."); continue; }
+                locker.ParentId = parent; locker.SlotId = slot; locker.Location = was;
+                report.Problem = "no room in the hidden quest stash";
+                logger.Warning("[K9Companion] A kennel locker is outside its hidden stash and there's no room to put it back.");
+                continue;
+            }
+            var made = new Item { Id = new MongoId(), Template = template };
+            items.Add(made);
+            if (Place(pmc, made.Id, pmc.Inventory.QuestStashItems)) { report.Ready++; report.Made++; logger.Info("[K9Companion] Kennel locker set up."); }
+            else
+            {
+                items.Remove(made);
+                report.Problem = "no room in the hidden quest stash";
+                logger.Warning("[K9Companion] No room for a kennel locker yet; trying again next game start.");
+            }
         }
+        return report;
+    }
+
+    public sealed class LockerReport
+    {
+        public int Ready, Made, Moved;
+        public string? Problem;
     }
 
     public void RaidEnded(MongoId sessionId, PmcData pmc, bool isDead, bool isTransfer, EndLocalRaidRequestData request, string? location = null)
@@ -299,7 +351,8 @@ public sealed class BagKeeper(ISptLogger<BagKeeper> logger, ProfileHelper profil
             isDead, isTransfer, id => BagLedger.PutBack(pmc.Inventory.Items!, KitFor(pmc, record), id));
         // Moving to the next map: the jacket and head gear stay with the dog (and at risk).
         if (outcome == BagLedger.Outcome.Transit || (isTransfer && record.KitIds is { Count: > 0 })) return;
-        if (record.KitIds is { Count: > 0 } && (isDead || (record.DogDied && !record.GearTaken)))
+        bool dogOut = isDead && record.DogExtracted && !record.DogDied;
+        if (record.KitIds is { Count: > 0 } && ((isDead && !dogOut) || (record.DogDied && !record.GearTaken)))
         {
             foreach (string id in record.KitIds) BagLedger.RemoveWithChildren(pmc.Inventory.Items!, new MongoId(id));
             Insure(sessionId, pmc, record.KitIds.Select(id => new MongoId(id)), location, request);
@@ -476,6 +529,8 @@ public sealed class BagKeeper(ISptLogger<BagKeeper> logger, ProfileHelper profil
 
     private BagRecord Load(PmcData pmc)
     {
+        // A record from the profile's character before a prestige or wipe is dropped first (K9Store.Load).
+        k9.Load(pmc);
         string path = RecordPath(pmc);
         try { return files.FileExists(path) ? json.Deserialize<BagRecord>(files.ReadFile(path)) ?? new BagRecord() : new BagRecord(); }
         catch (Exception e) { logger.Error($"[K9Companion] Couldn't read {path}: {e.Message}"); return new BagRecord(); }
@@ -513,8 +568,17 @@ public static class BagLedger
         Item? bag = serverItems.FirstOrDefault(i => i.Id == bagId);
         List<Item> postBag = postItems?.GetItemWithChildren(bagId) ?? new List<Item>();
         bool cameBack = postBag.Count > 0 && postBag[0].ParentId == postRaidContainerId;
+        // You were killed but played the dog out through an extract: its jacket comes home with it. The game wiped it with
+        // your gear, so it's put back as the client last had it.
+        bool dogOut = isDead && record.DogExtracted && !record.DogDied && cameBack;
+        if (dogOut && bag == null)
+        {
+            serverItems.RemoveAll(i => postBag.Any(p => p.Id == i.Id));
+            serverItems.AddRange(postBag);
+            bag = postBag[0];
+        }
         // Back in the raid container with a living dog, or (a killed dog's, taken off it) in your own gear.
-        bool keep = !isDead && bag != null && postBag.Count > 0 && (cameBack ? !record.DogDied : record.DogDied && record.GearTaken);
+        bool keep = bag != null && postBag.Count > 0 && (dogOut || (!isDead && (cameBack ? !record.DogDied : record.DogDied && record.GearTaken)));
         if (bag == null) return isDead ? Outcome.LostWithPlayer : record.DogDied ? Outcome.LostWithDog : Outcome.Lost;
         if (keep)
         {

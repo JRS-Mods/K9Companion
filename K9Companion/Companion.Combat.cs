@@ -79,8 +79,8 @@ namespace K9Companion
         internal bool Downed => downed;
         // Just over its head: where its health bar floats.
         internal Vector3 OverheadPoint => dog == null ? Vector3.zero : (headBone != null ? headBone.position : dog.transform.position + Vector3.up * .7f) + Vector3.up * .35f;
-        // In combat mode this raid (only then can it be hurt).
-        internal bool CanBeHurt => rules.Combat;
+        // In combat mode this raid, without god mode (only then can it be hurt).
+        internal bool CanBeHurt => !rules.Immortal;
         // Seconds left to revive a downed dog; negative when there's no clock (or it isn't down).
         internal float DownedSecondsLeft => downed && downedUntil > 0 ? Mathf.Max(0, downedUntil - Time.time) : -1;
         // Killed for good (not lying downed, waiting to be revived).
@@ -88,7 +88,7 @@ namespace K9Companion
         private string DeadNote => Plugin.DogName.Value + (downed ? " is down" : " is dead");
         internal float DistanceTo(Player player) => dog == null || player == null ? float.MaxValue : Vector3.Distance(dog.transform.position, player.Transform.position);
         internal Player Owner => CurrentPlayer;
-        internal bool Resting => stance != Stance.Stand || shownSpeed < .15f;
+        internal bool Resting => (stance != Stance.Stand && stance != Stance.Jump) || shownSpeed < .15f;
         internal bool Targetable => dog != null && dog.activeInHierarchy && hitboxes != null && !dead && rules.CanBeTargeted;
         private bool HasTask => attackTarget != null;
 
@@ -143,20 +143,17 @@ namespace K9Companion
             return go.AddComponent<T>();
         }
 
-        // Breathing, all the time: quiet and slow at rest, softer still asleep, harder and faster after a run (it builds over
-        // a few seconds of running and settles over half a minute) or when it's hurt (the worse, the harder).
+        // Panting only after a hard run: it builds while the dog runs flat out (keeping up with you sprinting, or chasing)
+        // and dies away over half a minute once it slows. Otherwise it's quiet: no breathing at rest, asleep or walking.
         private void TickBreathing()
         {
             if (dog == null) return;
             if (dead) { audio?.Breathe(0, 1); return; }
-            bool running = stance == Stance.Stand && shownSpeed > .15f && gait >= Gait.Run;
-            exertion = Mathf.Clamp01(exertion + (running ? Time.deltaTime / 6f : -Time.deltaTime / 30f));
-            float hurt = rules.Combat && rules.Health > 0 ? Mathf.Clamp01((1 - health / rules.Health) * 1.3f) : 0;
-            float effort = Mathf.Max(exertion, hurt);
-            bool asleep = stance == Stance.Sleeping || stance == Stance.SleepDown;
-            // Barely there at rest (you hear it right beside the dog), harder only after running or when hurt.
-            if (asleep) audio?.Breathe(.08f, .85f);
-            else audio?.Breathe(.32f + .68f * effort, .92f + .25f * effort);
+            bool running = (stance == Stance.Stand || stance == Stance.Jump) && shownSpeed > 4f && gait >= Gait.Run;
+            exertion = Mathf.Clamp01(exertion + (running ? Time.deltaTime / 8f : -Time.deltaTime / 30f));
+            // Only once it's really winded, and fading out to nothing rather than stopping dead.
+            float effort = Mathf.InverseLerp(.25f, 1f, exertion);
+            audio?.Breathe(effort > 0 ? .3f + .7f * effort : 0, .95f + .22f * effort);
         }
 
         private void UpdateHitboxes()
@@ -245,6 +242,7 @@ namespace K9Companion
         private void Die(bool fromLeft)
         {
             dead = true; health = 0; hitClip = null; actionClip = null; speed = shownSpeed = 0;
+            CancelJump();
             downed = Plugin.Downable && !IsHideout;
             RecordHealth();
             K9.DogDied();
@@ -529,7 +527,8 @@ namespace K9Companion
         {
             if (brain.State == CombatState.Idle)
             {
-                if (Wounded || command != Command.Follow || actionClip != null || Time.time < nextScan) return;
+                // Playing the dog after you died: it goes only where you send it.
+                if (Wounded || command != Command.Follow || actionClip != null || Time.time < nextScan || controlled) return;
                 nextScan = Time.time + .5f;
                 Player under = rules.CanAttack ? Shooter(owner) : null;
                 Player found = FindEnemy(owner);
@@ -550,7 +549,7 @@ namespace K9Companion
             if (!rules.CanAttack || command != Command.Follow) { StopFight(); return; }
             // Someone else opens up on you while it's on its way back, or chasing something it picked itself: them first. Never
             // over an order of yours, nor when it's about to get its teeth into what it's after.
-            if (PicksFights && !Wounded && Time.time >= nextScan
+            if (PicksFights && !controlled && !Wounded && Time.time >= nextScan
                 && (brain.State == CombatState.Return || (brain.State == CombatState.Chase && (!brain.Ordered || defending))))
             {
                 nextScan = Time.time + .5f;

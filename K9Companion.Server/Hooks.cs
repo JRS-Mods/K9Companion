@@ -47,7 +47,9 @@ public sealed class BagRouter(JsonUtil json, BagKeeper keeper) : StaticRouter(js
     new RouteAction<BagEmptyRequest>("/k9companion/bag/gear-taken",
         (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.GearTaken(sessionId))),
     new RouteAction<BagEmptyRequest>("/k9companion/bag/dog-revived",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.DogRevived(sessionId)))
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.DogRevived(sessionId))),
+    new RouteAction<BagEmptyRequest>("/k9companion/bag/dog-extracted",
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.DogExtracted(sessionId)))
 ]);
 
 [Injectable]
@@ -63,7 +65,9 @@ public sealed class K9Router(JsonUtil json, K9Keeper k9) : StaticRouter(json, [
     new RouteAction<BagEmptyRequest>("/k9companion/k9/dog-died",
         (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(k9.DogDied(sessionId))),
     new RouteAction<BagEmptyRequest>("/k9companion/k9/dog-revived",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(k9.DogRevived(sessionId)))
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(k9.DogRevived(sessionId))),
+    new RouteAction<BagEmptyRequest>("/k9companion/k9/lockers",
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(k9.Lockers(sessionId)))
 ]);
 
 [Injectable(TypePriority = OnLoadOrder.Preload + 2)]
@@ -232,6 +236,8 @@ public sealed class DogSettingsFile(ModHelper mods, ISptLogger<DogSettingsFile> 
           "downedMode": null,        // true: a dog out of health collapses and can be revived with a K9 veterinary kit. false: it dies.
           "bleedOutTime": null,      // 0 to 600: seconds to revive a downed dog (0 = as long as the raid lasts).
           "carryLimit": null,        // 0 to 200: kg a dog's jacket can weigh before it slows down (0 = no limit).
+          "godMode": null,           // true: dogs fight as usual but can't be hurt or killed. false: no god mode for anyone.
+          "controlAfterDeath": null, // true: when you die you can carry on as your dog (if it's alive). false: not on this server.
           "dogHealth": null          // 30 to 1000: a dog's hit points.
         }
         """.Replace("{TraderLine}", TraderLine);
@@ -296,6 +302,14 @@ public sealed class DogSettingsFile(ModHelper mods, ISptLogger<DogSettingsFile> 
                 "\"bleedOutTime\": null,      // 0 to 600: seconds to revive a downed dog (0 = as long as the raid lasts).\n" + indent +
                 "\"carryLimit\": null,        // 0 to 200: kg a dog's jacket can weigh before it slows down (0 = no limit).\n" + indent);
         }
+        health = text.IndexOf("\"dogHealth\"", StringComparison.Ordinal);
+        if (!text.Contains("\"godMode\"") && health >= 0)
+        {
+            string indent = new string(' ', health - (text.LastIndexOf('\n', health) + 1));
+            text = text.Insert(health,
+                "\"godMode\": null,           // true: dogs fight as usual but can't be hurt or killed. false: no god mode for anyone.\n" + indent +
+                "\"controlAfterDeath\": null, // true: when you die you can carry on as your dog (if it's alive). false: not on this server.\n" + indent);
+        }
         File.WriteAllText(FilePath, text);
     }
 
@@ -329,7 +343,7 @@ public sealed class DogSettingsFile(ModHelper mods, ISptLogger<DogSettingsFile> 
                 if (known != null) answer["aggression"] = known;
                 else logger.Warning("[K9Companion] config.jsonc: aggression should be \"Passive\", \"Defensive\", \"Aggressive\" or null; ignored.");
             }
-            foreach (string key in new[] { "soloOnly", "downedMode" })
+            foreach (string key in new[] { "soloOnly", "downedMode", "godMode", "controlAfterDeath" })
             {
                 if (file[key] is not JsonNode flag) continue;
                 if (flag.GetValueKind() is JsonValueKind.True or JsonValueKind.False) answer[key] = flag.GetValue<bool>();

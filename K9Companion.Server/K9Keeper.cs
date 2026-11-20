@@ -186,14 +186,39 @@ public sealed class K9Keeper(ISptLogger<K9Keeper> logger, ProfileHelper profiles
         }
         // Trust Is Earned done but the dog never handed over (e.g. completed while the server mod was out): do it now.
         if (!state.Owned && Kennel.QuestDone(pmc, K9Ids.TrustIsEarned)) Grant(pmc, state, null);
+        // The kennel lockers come first and on their own, so nothing below that fails can keep them from being set up.
+        if (state.Owned)
+            try { bags.EnsureLockers(pmc); }
+            catch (Exception e) { logger.Error("[K9Companion] Couldn't set up the kennel lockers: " + e); }
         if (state.Raid.Deployed && Now - state.Raid.StartedAt > 6 * 3600) state.Raid = new RaidRecord();   // a raid that never ended
         MigrateQuestline(pmc, state);
         ResetContracts(pmc, state);
         CheckArmour(pmc, state);
         Enforce(pmc, state);
         SyncCompletion(pmc, null);
-        if (state.Owned) bags.EnsureLockers(pmc);
         store.Save(pmc, state);
+    }
+
+    /// <summary>
+    /// The DOG tab couldn't find a kennel locker: set them up (or put back) now and say what happened. The game only reads
+    /// the profile at start, so one made now shows from the next start.
+    /// </summary>
+    public string Lockers(MongoId sessionId)
+    {
+        PmcData? pmc = profiles.GetPmcProfile(sessionId);
+        K9State? state = store.Load(pmc);
+        if (pmc == null || state == null) return "{\"ok\":false,\"problem\":\"no character\"}";
+        if (!state.Owned) return "{\"ok\":false,\"problem\":\"the server says you have no dog yet\"}";
+        BagKeeper.LockerReport report;
+        try { report = bags.EnsureLockers(pmc); }
+        catch (Exception e)
+        {
+            logger.Error("[K9Companion] Couldn't set up the kennel lockers: " + e);
+            return json.Serialize(new Dictionary<string, object> { ["ok"] = false, ["problem"] = e.GetType().Name + ": " + e.Message }, false)!;
+        }
+        var answer = new Dictionary<string, object> { ["ok"] = report.Problem == null, ["ready"] = report.Ready, ["made"] = report.Made, ["moved"] = report.Moved };
+        if (report.Problem != null) answer["problem"] = report.Problem;
+        return json.Serialize(answer, false)!;
     }
 
     // After the game has saved the raid (and replaced the profile's counters with the client's copy).
@@ -435,6 +460,9 @@ public sealed class K9State
     public const int CurrentVersion = 1;
 
     [JsonPropertyName("version")] public int Version { get; set; }
+    // When the character this belongs to was made (the profile's registration date). A prestige or a wipe makes a new
+    // character on the same profile id: its K9 progress starts over (K9Store.Load).
+    [JsonPropertyName("character")] public long Character { get; set; }
     // Whether this profile has the dog. Profiles that had it before 0.16 keep it ("legacy"); new ones get it from
     // Trust Is Earned ("quest").
     [JsonPropertyName("owned")] public bool Owned { get; set; }
@@ -506,7 +534,44 @@ public sealed class K9Store(ISptLogger<K9Store> logger, FileUtil files, JsonUtil
                                : "[K9Companion] New handler: Dr. Yang's questline leads to your first dog (Trust Is Earned).");
         }
         if (Migrate(state)) Save(pmc, state);
+        long character = pmc.Info?.RegistrationDate ?? 0;
+        if (character > 0 && state.Character != character)
+        {
+            // Files from before 1.4.0 don't say whose they are: only progress this character can't have had gives it away.
+            string? why = state.Character != 0 ? "a new character (prestige or wipe)" : FromEarlierCharacter(pmc, state);
+            if (why != null)
+            {
+                StartOver(pmc, why);
+                return Load(pmc);
+            }
+            state.Character = character;
+            Save(pmc, state);
+        }
         return state;
+    }
+
+    // Dog progress the profile can't have earned as it stands: the dog from Trust Is Earned without that quest done, or
+    // Dr. Yang's contracts without The Last Handler.
+    private static string? FromEarlierCharacter(PmcData pmc, K9State state)
+    {
+        if (state.Owned && state.OwnedBy == "quest" && !Kennel.QuestDone(pmc, K9Ids.TrustIsEarned)) return "the dog was earned by an earlier character";
+        if (state.Contracts.Count > 0 && !Kennel.QuestDone(pmc, K9Ids.LastHandler)) return "contracts done by an earlier character";
+        return null;
+    }
+
+    // The K9 files of the character before (the state, the jacket record and the dog's needs) are kept as copies and
+    // removed, so this character starts as a new handler: the questline, the kennel and the dog are earned again.
+    private void StartOver(PmcData pmc, string why)
+    {
+        long stamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        foreach (string name in new[] { "K9Companion.k9.json", "K9Companion.json", "K9Companion.needs.json" })
+        {
+            string path = $"{Folder(pmc)}/{name}";
+            if (!files.FileExists(path)) continue;
+            try { files.CopyFile(path, $"{path}.old-character-{stamp}", true); files.DeleteFile(path); }
+            catch (Exception e) { logger.Warning($"[K9Companion] Couldn't set aside {path}: {e.Message}"); }
+        }
+        logger.Info($"[K9Companion] New character on this profile ({why}): Dr. Yang's questline, the kennel and the dog start over. The old files are kept beside the new ones.");
     }
 
     // Versioned upgrades of the file. Version 0 = just created or written before versions existed.
