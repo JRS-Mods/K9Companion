@@ -79,22 +79,38 @@ foreach ($look in 'harness_chestrig', 'harness_pocket', 'harness_tactical', 'har
 }
 # The custom kennel models (tools/convert_kennel_models.py).
 $files += (Join-Path $root 'assets\kennel_models.props')
-# Each with its colour, normal map and metal/smoothness map.
+# Each with its colour and normal map. (No metal/smoothness maps since 1.5.0: the game's Standard shader has no variant
+# that reads them, so they never showed.)
 foreach ($prop in 'crate', 'doghouse', 'toybox', 'foodbag') {
-    $files += (Join-Path $root "assets\kennel_$prop.jpg"), (Join-Path $root "assets\kennel_${prop}_n.png"), (Join-Path $root "assets\kennel_${prop}_ms.png")
+    $files += (Join-Path $root "assets\kennel_$prop.jpg"), (Join-Path $root "assets\kennel_${prop}_n.png")
 }
 foreach ($style in 'training', 'black', 'buckle') {
     $files += (Join-Path $root "assets\gear_collar_$style.mesh"), (Join-Path $root "assets\gear_collar_$style.jpg")
     # The collar as an item (0.31): off the dog (tools/convert_item_models.py) and its stash icon (tools/render_gear_icons.py).
     $files += (Join-Path $root "assets\gear_collar_${style}_item.mesh"), (Join-Path $root "assets\icon_collar_$style.png")
 }
-# The dog's supplies and K9 story items as their own models (tools/convert_dog_items.py): model, its three maps, icon.
+# The dog's supplies and K9 story items as their own models (tools/convert_dog_items.py): model, colour, normal map, icon.
 foreach ($key in 'can', 'meat', 'duffel', 'tag', 'vetkit') {
-    foreach ($suffix in '.mesh', '.jpg', '_n.png', '_ms.png') { $files += (Join-Path $root "assets\gear_item_$key$suffix") }
+    foreach ($suffix in '.mesh', '.jpg', '_n.png') { $files += (Join-Path $root "assets\gear_item_$key$suffix") }
     $files += (Join-Path $root "assets\icon_item_$key.png")
 }
 # The vet supply case (1x1, no longer spawns; players may still have one) shares the vet kit's model: its own icon at its size.
 $files += (Join-Path $root 'assets\icon_item_vetkit_1x1.png')
+# The other breeds (tools/convert_breed.py; their gear fitted by convert_gear.py / convert_attachment.py with DOG_BREED) go
+# in breeds/<id>/, each with its coats' shared fur-strand alpha (coat_alpha.png).
+$breeds = 'rottweiler', 'husky', 'beagle', 'shibainu', 'pug'
+$breedFiles = @()
+foreach ($breed in $breeds) {
+    $folder = Join-Path $root "assets\breeds\$breed"
+    foreach ($file in 'dog.dog', 'breed.json', 'coat1.jpg', 'coat2.jpg', 'coat3.jpg', 'coat_alpha.png', 'dog_n.png', 'dog_ao.png') {
+        $f = Join-Path $folder $file
+        if (-not (Test-Path $f)) { throw "Missing $f" }
+        $breedFiles += [pscustomobject]@{ Path = $f; Entry = "BepInEx/plugins/$name/breeds/$breed/$file" }
+    }
+    foreach ($gear in Get-ChildItem -LiteralPath $folder -Filter 'gear_*.mesh' -File) {
+        $breedFiles += [pscustomobject]@{ Path = $gear.FullName; Entry = "BepInEx/plugins/$name/breeds/$breed/" + $gear.Name }
+    }
+}
 $soundFolder = Join-Path $root 'assets\sounds'
 $soundFiles = @()
 if (Test-Path $soundFolder) { $soundFiles = @(Get-ChildItem -LiteralPath $soundFolder -Filter '*.wav' -File) }
@@ -106,6 +122,9 @@ $langScript = Join-Path $root 'tools\make_lang_template.py'
 if ($python -and (Test-Path $langScript)) { & $python.Source -I $langScript; if ($LASTEXITCODE -ne 0) { throw 'Making lang\en.json failed.' } }
 $langFiles = @()
 if (Test-Path (Join-Path $root 'lang')) { $langFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'lang') -Filter '*.json' -File) }
+# The K9 kennels room: a Hideout Extensions spot (its server mod reads any mod's hideoutextensions folder).
+$serverSpots = @(Get-ChildItem -LiteralPath (Join-Path (Split-Path $serverProject -Parent) 'hideoutextensions') -Filter '*.json' -File)
+if ($serverSpots.Count -eq 0) { throw 'Missing K9Companion.Server\hideoutextensions\k9_kennels.json.' }
 $serverLangFolder = Join-Path (Split-Path $serverProject -Parent) 'lang'
 $serverLangFiles = @()
 if (Test-Path $serverLangFolder) { $serverLangFiles = @(Get-ChildItem -LiteralPath $serverLangFolder -Filter '*.json' -File) }
@@ -119,6 +138,9 @@ $archive = [System.IO.Compression.ZipFile]::Open($zip, 'Create')
 try {
     foreach ($f in $files) {
         [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $f, "BepInEx/plugins/$name/" + (Split-Path $f -Leaf)) | Out-Null
+    }
+    foreach ($entry in $breedFiles) {
+        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $entry.Path, $entry.Entry) | Out-Null
     }
     foreach ($sound in $soundFiles) {
         [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $sound.FullName, "BepInEx/plugins/$name/sounds/" + $sound.Name) | Out-Null
@@ -134,6 +156,9 @@ try {
     }
     foreach ($picture in $questPictures) {
         [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $picture.FullName, "SPT_Runtime/user/mods/$serverName/res/quests/" + $picture.Name) | Out-Null
+    }
+    foreach ($spot in $serverSpots) {
+        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $spot.FullName, "SPT_Runtime/user/mods/$serverName/hideoutextensions/" + $spot.Name) | Out-Null
     }
 }
 finally {
@@ -170,12 +195,26 @@ if (-not $NoInstall) {
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
     }
     Get-ChildItem -LiteralPath $dest -Filter 'gear_camera_*.mesh' -File | Where-Object { $_.Name -notlike 'gear_camera_action_*' } | Remove-Item
+    # 1.5.0: metal/smoothness maps no longer ship (the game's shader never read them), and kept textures are filed under
+    # their path (every breed has a coat1.jpg): the maps and the old by-name cache entries go.
+    Get-ChildItem -LiteralPath $dest -Filter '*_ms.png' -File -Recurse | Remove-Item
+    # The pet cards became adoption papers with the game's own picture: their stash pictures go.
+    Get-ChildItem -LiteralPath $dest -Filter 'icon_card_*.png' -File | Remove-Item
+    $cache = Join-Path $dest 'cache'
+    if (Test-Path -LiteralPath $cache) {
+        Get-ChildItem -LiteralPath $cache -Filter '*.tex' -File | Where-Object { $_.Name -match '^(coat\d\.jpg|dog_n\.png|dog_ms\.png)\.' } | Remove-Item
+    }
     if ($soundFiles.Count -gt 0) {
         $soundDest = Join-Path $dest 'sounds'
         New-Item -ItemType Directory -Force $soundDest | Out-Null
         # The sounds folder is the mod's: one no longer shipped (0.21's pant.wav became breathing.wav) is taken out.
         Get-ChildItem -LiteralPath $soundDest -Filter '*.wav' -File | Where-Object { $soundFiles.Name -notcontains $_.Name } | Remove-Item
         Copy-Item -LiteralPath $soundFiles.FullName -Destination $soundDest -Force
+    }
+    foreach ($entry in $breedFiles) {
+        $to = Join-Path $SPTPath ($entry.Entry.Replace('/', [IO.Path]::DirectorySeparatorChar))
+        New-Item -ItemType Directory -Force (Split-Path $to -Parent) | Out-Null
+        Copy-Item -LiteralPath $entry.Path -Destination $to -Force
     }
     if ($langFiles.Count -gt 0) {
         New-Item -ItemType Directory -Force (Join-Path $dest 'lang') | Out-Null
@@ -192,6 +231,8 @@ if (-not $NoInstall) {
         catch { Rename-Item $installed "$serverName.dll.previous-$(Get-Date -Format yyyyMMddHHmmss)" }
     }
     Copy-Item $serverDll $serverDest -Force
+    New-Item -ItemType Directory -Force (Join-Path $serverDest 'hideoutextensions') | Out-Null
+    Copy-Item -LiteralPath $serverSpots.FullName -Destination (Join-Path $serverDest 'hideoutextensions') -Force
     New-Item -ItemType Directory -Force (Join-Path $serverDest 'res') | Out-Null
     Copy-Item $serverPortrait (Join-Path $serverDest 'res') -Force
     if ($questPictures.Count -gt 0) {

@@ -111,7 +111,7 @@ namespace K9Companion
 
         private void Build(InventoryScreen screen, ItemsPanel items, ItemContext context, Profile profile, IEnumerable<GameObject> hidden)
         {
-            this.screen = screen; this.profile = profile; this.context = context;
+            this.screen = screen; this.profile = profile; this.context = context; itemsPanel = items;
             keepHidden.AddRange(hidden);
             font = screen.GetComponentsInChildren<TMP_Text>(true).Select(t => t.font).FirstOrDefault(f => f != null);
 
@@ -144,6 +144,7 @@ namespace K9Companion
             ShowStats(items);
             BuildBehaviour();
             BuildKennel();
+            BuildPackButton();
             Refresh();
         }
 
@@ -1119,7 +1120,11 @@ namespace K9Companion
             spot.Step = step;
             spot.After = own;
             spot.MoveToFree();
-            try { TabScroll.Fit(bar, game.FirstOrDefault() ?? from, step, back); }
+            try
+            {
+                if (Plugin.ScrollingTabs.Value) TabScroll.Fit(bar, game.FirstOrDefault() ?? from, step, back);
+                else TabScroll.Remove(bar);
+            }
             catch (Exception e) { Plugin.Log.LogWarning("The tab bar couldn't be made to scroll (the tabs stay as they are): " + e.Message); }
             Report(dog, $"at {to.anchoredPosition}, the first free place right of {own.name}");
         }
@@ -1309,6 +1314,24 @@ namespace K9Companion
             scroll.Refit(0);
         }
 
+        /// <summary>
+        /// Scrolling turned off (Display > Scrolling tab bar): the tabs go back on the bar where they were, the strip goes.
+        /// 'tabs' is what the tabs are in (the strip, if it was made). Nothing to do if it never was.
+        /// </summary>
+        internal static void Remove(Transform tabs)
+        {
+            if (tabs == null || tabs.name != ContentName) return;
+            TabScroll scroll = tabs.parent != null ? tabs.parent.GetComponent<TabScroll>() : null;
+            Transform bar = scroll != null ? scroll.bar : tabs.parent?.parent;
+            if (bar == null) return;
+            // Unscrolled first, so every tab lands back exactly where it stood on the bar.
+            if (scroll != null) { scroll.content.anchoredPosition = scroll.home; scroll.offset = 0; }
+            foreach (Tab tab in tabs.GetComponentsInChildren<Tab>(true).Where(t => t.transform.parent == tabs).ToList())
+                tab.transform.SetParent(bar, true);
+            UnityEngine.Object.Destroy(tabs.parent.gameObject);
+            Plugin.Log.LogInfo($"Tab bar '{bar.name}' no longer scrolls (Display > Scrolling tab bar is off).");
+        }
+
         // The strip's window: from the first tab to the first button right of it on its row (the back button), or the
         // screen's edge.
         private void FitView(RectTransform firstTab)
@@ -1317,8 +1340,10 @@ namespace K9Companion
             float right = Screen.width - 4;
             // The screen's BACK button is the game's own kind of button, not a Unity one: it's measured by name.
             if (back != null && back.gameObject.activeInHierarchy) right = Stop(back, row, right, true);
+            // Only what can be seen there: the stash's and inventory's rows scroll up behind the top bar, cut off by their
+            // list's mask, and counted as they were they narrowed the strip as you scrolled down.
             foreach (Selectable button in Selectable.allSelectablesArray)
-                if (button != null && button.isActiveAndEnabled && !button.transform.IsChildOf(bar) && button.transform is RectTransform rect) right = Stop(rect, row, right, false);
+                if (button != null && button.isActiveAndEnabled && !button.transform.IsChildOf(bar) && button.transform is RectTransform rect) right = Stop(rect, row, right, false, true);
             Camera cam = DogTabSpot.CameraOf(bar);
             float pad = row.height * .3f;
             RectTransformUtility.ScreenPointToLocalPointInRectangle(bar, new Vector2(row.xMin - 2, row.yMin - pad), cam, out Vector2 low);
@@ -1331,14 +1356,29 @@ namespace K9Companion
         }
 
         // Where the window has to end for something on the tabs' row, right of the first tab (and not part of the bar).
-        private float Stop(RectTransform thing, Rect row, float right, bool withLabel)
+        private float Stop(RectTransform thing, Rect row, float right, bool withLabel, bool clipped = false)
         {
             Rect r = DogTabSpot.WorldRect(thing);
+            if (clipped && !Shown(thing, ref r)) return right;
             // Its visible part too: a button's label can stick out of its own rect (BACK's does).
             if (withLabel) foreach (Graphic g in thing.GetComponentsInChildren<Graphic>())
                 if (g.isActiveAndEnabled && g.color.a > .05f) { Rect gr = DogTabSpot.WorldRect(g.rectTransform); if (gr.width > 0 && gr.width < row.width * 4) r = Rect.MinMaxRect(Mathf.Min(r.xMin, gr.xMin), Mathf.Min(r.yMin, gr.yMin), Mathf.Max(r.xMax, gr.xMax), Mathf.Max(r.yMax, gr.yMax)); }
             if (r.width < 1 || r.height < 1 || r.width > row.width * 4 || r.yMax < row.yMin + row.height * .25f || r.yMin > row.yMax - row.height * .25f) return right;
             return r.xMin > row.xMin + row.width * .5f ? Mathf.Min(right, r.xMin - 6) : right;
+        }
+
+        // The part of 'thing' its masks let show (a list's viewport cuts off the rows scrolled out of it): false if none.
+        private static bool Shown(Transform thing, ref Rect r)
+        {
+            for (Transform t = thing.parent; t != null; t = t.parent)
+            {
+                if (!(t is RectTransform clip)) continue;
+                if (!(clip.GetComponent<RectMask2D>() is RectMask2D m2 && m2.enabled) && !(clip.GetComponent<Mask>() is Mask m && m.enabled)) continue;
+                Rect c = DogTabSpot.WorldRect(clip);
+                r = Rect.MinMaxRect(Mathf.Max(r.xMin, c.xMin), Mathf.Max(r.yMin, c.yMin), Mathf.Min(r.xMax, c.xMax), Mathf.Min(r.yMax, c.yMax));
+                if (r.width <= 0 || r.height <= 0) return false;
+            }
+            return true;
         }
 
         // Fits the window again (the screen may have changed, or still be sliding in), then scrolls back to 'keep'.

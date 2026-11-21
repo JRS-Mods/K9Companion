@@ -27,6 +27,9 @@ namespace K9Companion
         public string Vest, Head, Collar;
         public bool Camera;
         public float Scale;
+        // Which of its dogs it is: the breed (Breed.Id) and coat.
+        public string Breed;
+        public int Coat;
     }
 
     internal enum DogNote : byte { Sound, Gone, Bitten, Spotted, AskHostile, Hostile, NotHostile }
@@ -280,7 +283,7 @@ namespace K9Companion
                 copy.ownerNet = ownerNet;
                 if (!headless)
                 {
-                    copy.model = DogModel.Load(Plugin.AssetFolder, go.transform, Plugin.Scale.Value);
+                    copy.model = DogModel.Load(Breed.Shepherd, 1, go.transform, Plugin.Scale.Value);
                     copy.decor = new CompanionDecor(go.transform, copy.model);
                     copy.sound = new CompanionAudio(go);
                     copy.pelvis = copy.model.Bone("RigPelvis"); copy.chest = copy.model.Bone("RigChest"); copy.head = copy.model.Bone("RigHead");
@@ -302,6 +305,20 @@ namespace K9Companion
         internal void Dress(DogLooks looks)
         {
             if (decor == null) return;
+            // Another breed or coat than it was first drawn as (every copy starts as the shepherd until its looks come).
+            Breed breed = Breed.Get(looks.Breed);
+            if (model != null && (model.Breed != breed || model.Coat != Math.Max(1, looks.Coat)))
+            {
+                try
+                {
+                    decor.Dispose(); model.Dispose();
+                    foreach (Transform child in transform) Destroy(child.gameObject);
+                    model = DogModel.Load(breed, Math.Max(1, looks.Coat), transform, Plugin.Scale.Value);
+                    decor = new CompanionDecor(transform, model);
+                    pelvis = model.Bone("RigPelvis"); chest = model.Bone("RigChest"); head = model.Bone("RigHead");
+                }
+                catch (Exception e) { Plugin.Log.LogError("Another player's dog couldn't be drawn as their " + breed.Name + ": " + e.Message); }
+            }
             decor.SetVest(looks.Vest); decor.SetHead(looks.Head); decor.SetCamera(looks.Camera); decor.SetCosmetics(looks.Collar);
             if (looks.Scale > 0) model.Root.localScale = Vector3.one * looks.Scale;
         }

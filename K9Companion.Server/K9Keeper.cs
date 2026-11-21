@@ -51,7 +51,7 @@ public sealed class K9Request : IRequestData
 ///  - Completing Trust Is Earned gives a new handler the dog (and its gear) once; contracts reset only from completed.
 /// </summary>
 [Injectable(InjectionType.Singleton)]
-public sealed class K9Keeper(ISptLogger<K9Keeper> logger, ProfileHelper profiles, K9Store store, BagKeeper bags, JsonUtil json, TemplateTable templates)
+public sealed class K9Keeper(ISptLogger<K9Keeper> logger, ProfileHelper profiles, K9Store store, BagKeeper bags, JsonUtil json, TemplateTable templates, PackKeeper pack)
 {
     private static long Now => DateTimeOffset.UtcNow.ToUnixTimeSeconds();
     // (0.30 took out the dog's loot search, and with it the "locate" and "retrieve" events.)
@@ -69,7 +69,8 @@ public sealed class K9Keeper(ISptLogger<K9Keeper> logger, ProfileHelper profiles
         {
             ["version"] = state.Version, ["owned"] = state.Owned, ["kennel"] = Kennel.CurrentLevel(pmc), ["loyalty"] = Kennel.YangLoyalty(pmc),
             ["collar"] = state.Collar, ["collars"] = Collars(pmc), ["tag"] = state.Tag, ["bed"] = state.Bed, ["training"] = state.Training, ["bedUnlocked"] = Kennel.QuestDone(pmc, K9Ids.TrustIsEarned),
-            ["presets"] = state.Presets, ["armour"] = state.Armour, ["counters"] = Counters(pmc, state)
+            ["presets"] = state.Presets, ["armour"] = state.Armour, ["counters"] = Counters(pmc, state),
+            ["dogs"] = pack.Roster(pmc, state), ["active"] = state.Active
         }, false)!;
     }
 
@@ -177,7 +178,10 @@ public sealed class K9Keeper(ISptLogger<K9Keeper> logger, ProfileHelper profiles
         if (pmc == null || state == null) return;
         // Checked every time rather than trusting the flag alone: the profile is written to disk later than this file,
         // so a server stopped in between would otherwise lose the kennel.
-        if (state.Owned && state.OwnedBy == "legacy")
+        // Only ever for the shepherd it was given with: with more dogs, the kennel's levels in the profile are the active
+        // dog's, and another dog's kennel is its own to build.
+        bool shepherdActive = state.Dogs == null || state.Dogs.Count == 0 || state.Dogs.FirstOrDefault(d => d.Id == state.Active)?.Breed == Pack.Shepherd;
+        if (state.Owned && state.OwnedBy == "legacy" && shepherdActive)
         {
             pmc.Hideout!.Improvements ??= new Dictionary<MongoId, HideoutImprovement>();
             if (!pmc.Hideout.Improvements.ContainsKey(K9Ids.Kennel[0]))
@@ -232,6 +236,9 @@ public sealed class K9Keeper(ISptLogger<K9Keeper> logger, ProfileHelper profiles
             bool extracted = !isDead && result is ExitStatus.SURVIVED or ExitStatus.RUNNER;
             if (state.Raid.Deployed && !state.Raid.DogDied && extracted && Advance(pmc, state, "extract"))
                 logger.Info("[K9Companion] Extracted with your dog: K9 objectives updated.");
+            // It came back with you: one more raid to grow up on (PackKeeper.Growth).
+            if (state.Raid.Deployed && !state.Raid.DogDied && extracted && state.Dogs?.FirstOrDefault(d => d.Id == state.Active) is DogRecord active)
+                active.RaidsSurvived++;
             state.Raid = new RaidRecord();
         }
         Enforce(pmc, state);
@@ -485,6 +492,10 @@ public sealed class K9State
     [JsonPropertyName("training")] public int Training { get; set; }
     [JsonPropertyName("presets")] public List<string> Presets { get; set; } = new();
     [JsonPropertyName("armour")] public Dictionary<string, ArmourRecord> Armour { get; set; } = new();
+    // Every dog you have (K9Pack.cs), and which one comes on raids: the fields above (and the needs file, the kennel's
+    // improvements, the gear holder) are that one's; the others keep theirs in their records.
+    [JsonPropertyName("dogs")] public List<DogRecord> Dogs { get; set; } = new();
+    [JsonPropertyName("active")] public string Active { get; set; } = "";
 }
 
 public sealed class RaidRecord
@@ -533,7 +544,7 @@ public sealed class K9Store(ISptLogger<K9Store> logger, FileUtil files, JsonUtil
             logger.Info(legacy ? "[K9Companion] Existing dog owner: your dog stays yours, and your kennel starts at level 1."
                                : "[K9Companion] New handler: Dr. Yang's questline leads to your first dog (Trust Is Earned).");
         }
-        if (Migrate(state)) Save(pmc, state);
+        if (Migrate(state) | PackKeeper.Sanitize(state)) Save(pmc, state);
         long character = pmc.Info?.RegistrationDate ?? 0;
         if (character > 0 && state.Character != character)
         {
@@ -728,10 +739,18 @@ public sealed class KennelImprovePatch : AbstractPatch
     private static InventoryHelper? inventory;
     private static PaymentHelper? payments;
     private static ISptLogger<KennelImprovePatch>? log;
+    private static DogSettingsFile? settings;
 
     public KennelImprovePatch(K9Store k9, EventOutputHolder eventOutputs, HttpResponseUtil http, InventoryHelper inventoryHelper,
-        PaymentHelper paymentHelper, ISptLogger<KennelImprovePatch> logger)
-    { store = k9; outputs = eventOutputs; responses = http; inventory = inventoryHelper; payments = paymentHelper; log = logger; }
+        PaymentHelper paymentHelper, DogSettingsFile dogSettings, ISptLogger<KennelImprovePatch> logger)
+    { store = k9; outputs = eventOutputs; responses = http; inventory = inventoryHelper; payments = paymentHelper; settings = dogSettings; log = logger; }
+
+    // The server's owner wants kennels built from found-in-raid materials (config.jsonc kennelFoundInRaid: true).
+    private static bool FoundInRaidOnly()
+    {
+        try { return System.Text.Json.Nodes.JsonNode.Parse(settings?.Read() ?? "{}")?["kennelFoundInRaid"]?.GetValue<bool>() == true; }
+        catch (Exception) { return false; }
+    }
 
     protected override MethodBase GetTargetMethod() => AccessTools.Method(typeof(HideoutController), nameof(HideoutController.ImproveArea));
 
@@ -749,6 +768,16 @@ public sealed class KennelImprovePatch : AbstractPatch
             __result = responses.AppendErrorToOutput(output, "K9 Kennel: " + locked);
             return false;
         }
+        // Checked before anything's taken, so a refusal takes nothing.
+        if (FoundInRaidOnly())
+            foreach (var handed in request.Items ?? new List<HideoutItem>())
+            {
+                Item? item = pmcData.Inventory?.Items?.FirstOrDefault(i => i.Id == handed.Id);
+                if (item == null || payments.IsMoneyTpl(item.Template) || item.Upd?.SpawnedInSession == true) continue;
+                log?.Warning($"[K9Companion] Refused to start the kennel's {level.Name}: {item.Template} wasn't found in raid (config.jsonc kennelFoundInRaid).");
+                __result = responses.AppendErrorToOutput(output, "K9 Kennel: this server builds kennels from found-in-raid materials only.");
+                return false;
+            }
         foreach (var handed in request.Items ?? new List<HideoutItem>())
         {
             Item? item = pmcData.Inventory?.Items?.FirstOrDefault(i => i.Id == handed.Id);

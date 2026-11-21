@@ -8,7 +8,7 @@
     <Copyright>Copyright © 2026 JRS</Copyright>
     <RootNamespace>K9Companion</RootNamespace>
     <LangVersion>latest</LangVersion>
-    <Version>1.4.0</Version>
+    <Version>1.5.0</Version>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <DebugType>none</DebugType>
     <SPTPath Condition="'$(SPTPath)' == ''">F:\SPT</SPTPath>
@@ -19,6 +19,8 @@
   <ItemGroup>
     <Compile Remove="tools\**;work\**;assets\**" />
     <InternalsVisibleTo Include="K9Companion.Fika" />
+    <!-- The dev-only test harness (never shipped). -->
+    <InternalsVisibleTo Include="K9DevRaid" />
     <Reference Include="BepInEx" HintPath="$(BepInExCore)\BepInEx.dll" Private="false" />
     <Reference Include="0Harmony" HintPath="$(BepInExCore)\0Harmony.dll" Private="false" />
     <Reference Include="Assembly-CSharp" HintPath="$(Managed)\Assembly-CSharp.dll" Private="false" />
@@ -27,6 +29,7 @@
     <Reference Include="Unity.TextMeshPro" HintPath="$(Managed)\Unity.TextMeshPro.dll" Private="false" />
     <Reference Include="Sirenix.Serialization" HintPath="$(Managed)\Sirenix.Serialization.dll" Private="false" />
     <Reference Include="HideoutExtensions" HintPath="$(SPTPath)\BepInEx\plugins\HideoutExtensions\HideoutExtensions.dll" Private="false" />
+    <Reference Include="HideoutInteriors" HintPath="$(SPTPath)\BepInEx\plugins\HideoutInteriors\HideoutInteriors.dll" Private="false" />
     <Reference Include="spt-common" HintPath="$(SPTPath)\BepInEx\plugins\spt\spt-common.dll" Private="false" />
     <Reference Include="ItemComponent.Types" HintPath="$(Managed)\ItemComponent.Types.dll" Private="false" />
     <Reference Include="Newtonsoft.Json" HintPath="$(Managed)\Newtonsoft.Json.dll" Private="false" />

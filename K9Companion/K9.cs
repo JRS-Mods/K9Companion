@@ -103,7 +103,18 @@ namespace K9Companion
                 foreach (var p in armour.Properties())
                     Armour[p.Name] = new Wear { Now = (float?)p.Value["now"] ?? 0, Max = (float?)p.Value["max"] ?? 0 };
             ApplyCounters(s["counters"] as JObject);
+            Pack.Apply(s["dogs"], (string)s["active"]);
             Loaded = true;
+        }
+
+        /// <summary>After changing dogs: the new active dog's own bed, training, tag and presets (Pack.Switch).</summary>
+        internal static void ApplySwitch(JObject s)
+        {
+            Tag = (string)s["tag"] ?? "steel";
+            Bed = (int?)s["bed"] ?? 0;
+            Training = (int?)s["training"] ?? 0;
+            var presets = s["presets"] as JArray;
+            for (int i = 0; i < Presets.Length; i++) Presets[i] = presets != null && i < presets.Count ? (string)presets[i] ?? "" : "";
         }
 
         /// <summary>The profile you're playing: the raid's in a raid, otherwise the session's.</summary>

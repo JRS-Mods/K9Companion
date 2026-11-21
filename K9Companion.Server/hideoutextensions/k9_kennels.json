@@ -1,0 +1,19 @@
+{
+  "id": "6a5d0c0c4fb9a3c5e1de0001",
+  "name": "K9 kennels",
+  "description": "A room for your dogs through the east hall's north wall. Every dog you have lives here, each at its own kennel along the walls.",
+  "room": {
+    "min": [14.6, 13.0],
+    "max": [27.1, 25.5],
+    "height": 3.1,
+    "lamps": 6,
+    "style": "hideout"
+  },
+  "opening": { "from": "6a70e5c0a1b2c3d4e5f60006", "position": [20.85, 0.0, 12.9], "facing": 180 },
+  "requirements": [
+    { "template": "5449016a4bdc2d6f028b456f", "count": 150000 },
+    { "template": "590c31c586f774245e3141b2", "count": 3 },
+    { "template": "57347c5b245977448d35f6e1", "count": 3 }
+  ],
+  "buildSeconds": 3600
+}

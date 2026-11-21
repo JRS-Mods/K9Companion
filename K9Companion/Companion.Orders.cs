@@ -107,7 +107,7 @@ namespace K9Companion
         {
             Aggression next = (Aggression)(((int)Plugin.DogAggression.Value + 1) % 3);
             Plugin.DogAggression.Value = next;
-            rules = Plugin.Rules(IsHideout);
+            rules = Breedwise(Plugin.Rules(IsHideout));
             // Told to wait for orders: it drops a fight it picked itself (one you ordered goes on).
             if (next == Aggression.Passive && attackTarget != null && (!brain.Ordered || defending)) StopFight();
             Say(Plugin.DogName.Value + (next == Aggression.Passive ? " attacks on your order." : next == Aggression.Defensive ? " defends you: it goes for whoever shoots at you." : " goes for any enemy it detects."));
@@ -295,8 +295,8 @@ namespace K9Companion
             prepared = null;
             nextWhine = Time.time + UnityEngine.Random.Range(240f, 540f);
             InitNeeds();
-            // The bed and bowls are the kennel's: a new handler has them once the Makeshift Kennel is built.
-            if (IsHideout) { kennelLevel = K9.Kennel(); if (kennelLevel >= 1) SetUpKennel(); else Plugin.Log.LogInfo("No kennel built yet: the dog has no bed or bowls."); }
+            // Every dog has its bed and bowls (as the other dogs at their kennels do); the kennel's levels add the rest.
+            if (IsHideout) { kennelLevel = K9.Kennel(); SetUpKennel(); }
             else { InitCombat(); dog.gameObject.AddComponent<DogCam>().Dog = this; dog.gameObject.AddComponent<DogHud>().Dog = this; }
         }
 
@@ -351,7 +351,7 @@ namespace K9Companion
         private void Care(Player owner, bool hideout, bool feed)
         {
             if (!hideout || decor.Home == null) { Say("Food and water are available at the hideout bed."); return; }
-            if (Vector3.Distance(owner.Transform.position, decor.Home.position) > 3)
+            if (Vector3.Distance(owner.Transform.position, (feed ? decor.FoodBowl : decor.WaterBowl) ?? decor.Home.position) > 3)
             { Say("Move closer to the dishes."); return; }
             if (!NeedsOn) { Say("Survival needs are off."); return; }
             RefillDish(owner, feed, false);
@@ -359,8 +359,8 @@ namespace K9Companion
 
         private void TickFeatures(float dt, Player owner, bool hideout)
         {
-            // Before the kennel is built the icon stands over the dog (opening the kennel's screen, where level 1 is built).
-            if (hideout) KennelIcon.Tick(kennelLevel >= 1 ? decor?.Home : dog?.transform, kennelLevel, this);
+            // Over the dog's bed (or over the dog while it has none), opening the kennel's screen, where its levels are built.
+            if (hideout) KennelIcon.Tick(decor?.Home != null ? decor.Home : dog?.transform, decor?.Home != null, kennelLevel, this);
             // A kennel level finished while you're in the hideout shows at once.
             if (hideout && Time.time >= nextKennelCheck)
             {
@@ -369,9 +369,8 @@ namespace K9Companion
                 if (level != kennelLevel)
                 {
                     Plugin.Log.LogInfo($"Kennel is now level {level}.");
-                    bool first = kennelLevel < 1 && level >= 1;
                     kennelLevel = level;
-                    if (first) SetUpKennel(); else KennelLevelChanged();
+                    if (decor?.Home == null) SetUpKennel(); else KennelLevelChanged();
                 }
             }
             TickNeeds(dt, owner, hideout);
@@ -441,7 +440,7 @@ namespace K9Companion
             if (Time.time >= nextLooks)
             {
                 nextLooks = Time.time + 5;
-                DogNet.SendLooks(new DogLooks { Vest = decor?.VestLook, Head = DogGear.RaidHead, Collar = DogGear.RaidCollar, Camera = DogGear.RaidCamera != null, Scale = Plugin.Scale.Value });
+                DogNet.SendLooks(new DogLooks { Vest = decor?.VestLook, Head = DogGear.RaidHead, Collar = DogGear.RaidCollar, Camera = DogGear.RaidCamera != null, Scale = model?.Size ?? Plugin.Scale.Value, Breed = Shape.Id, Coat = model?.Coat ?? 1 });
             }
             bool still = shownSpeed < .05f && !dead;
             if (Time.time < nextState) return;
@@ -885,7 +884,7 @@ namespace K9Companion
             if (!IsHideout || roaming || !Plugin.Roam.Value || decor?.Home == null || dead) return;
             bool lying = command == Command.Down && !bedTrip && meal == MealSource.None && actionClip == null
                          && (stance == Stance.Lying || stance == Stance.Sleeping);
-            bool onBed = Flat(dog.transform.position, decor.Home.position) < .8f;
+            bool onBed = Flat(dog.transform.position, decor.BedSpot.position) < .8f;
             if (lying && !onBed)
             {
                 if (offBedSince == 0) offBedSince = Time.time;
@@ -978,7 +977,7 @@ namespace K9Companion
             if (threshold <= 0 || IsHideout || world == null || command != Command.Follow || attackTarget != null || hunt != null
                 || Time.time < nextSniff || Time.time - lastAlert < SniffGap) return;
             nextSniff = Time.time + SniffEvery;
-            float radius = 10f + 2f * Mathf.Clamp(K9.Training, 0, 3);
+            float radius = 10f + 2f * Mathf.Clamp(K9.Training, 0, 3) + Shape.ScentBonus;
             Vector3 nose = dog.transform.position;
             string key = null, what = null; Vector3 where = default; float bestDistance = float.MaxValue;
             foreach (LootItem loot in world.LootItems.GetValuesEnumerator())
@@ -1526,7 +1525,7 @@ namespace K9Companion
             {
                 string name = DogNaming.Normalize(draft);
                 if (name.Length == 0) { error = "Please enter a name."; return; }
-                try { Plugin.SaveName(name); Close(); }
+                try { Plugin.SaveName(name); Pack.Renamed(name); Close(); }
                 catch (Exception e) { error = "Could not save the name. Please try again."; Plugin.Log.LogError(e); }
             }
         }

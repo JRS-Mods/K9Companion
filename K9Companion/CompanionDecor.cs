@@ -31,10 +31,21 @@ namespace K9Companion
             ("vest", "RigChest", new Vector3(0, .70f, .255f)),  // camera vest's own, on the front of its handle
             ("clip", "RigChest", new Vector3(0, .75f, .21f)),   // clip-on action camera on the jacket's back panel
         };
+        // The shepherd's chest bone (RigChest) in its bind pose, in the model's space: the lenses above are measured from it.
+        private static readonly Vector3 ShepherdChest = new Vector3(0, .534f, .135f);
         private readonly Dictionary<string, Transform> mounts = new Dictionary<string, Transform>();
         internal Transform Mount(string key) => mounts.TryGetValue(key, out Transform t) ? t : null;
         private Quaternion vestBind;
         public Transform Home { get; private set; }
+        // "K9 kennel" for the active dog's; another dog's kennel (KennelResidents) is named for that dog, so each kennel is in
+        // the way of the others when they're placed, and has no feeding spot of its own (only the active dog eats there).
+        internal string HomeName = "K9 kennel";
+        internal bool Resident;
+        // The dog's height against a shepherd's at Scale 1 (breed, growth and the Scale setting): a bed made for the
+        // shepherd is grown for a bigger dog (never shrunk for a smaller one).
+        private float? bodySize;
+        internal float BodySize { get => bodySize ?? (model != null ? model.Breed.Size * model.Size : 1); set => bodySize = value; }
+        private float BedFit => Mathf.Clamp(BodySize, 1, 1.6f);
         private PropModel props, models;
         // The kennel.props bed (about 1.1 x 1.2 m as made) is scaled down to fit the dog curled up on it; the hideout's
         // pet bed (0.41 x 0.33 m) is stretched to about 1.2 x 1.0 m so the dog fits inside lying down, its sides only a
@@ -65,6 +76,16 @@ namespace K9Companion
         private Bounds bedBounds = new Bounds(new Vector3(0, 0, BedZ), new Vector3(1f, .2f, 1.2f));
         // The bed and the cushion the dog lies on: raised onto the shelter's floor while there is one.
         private readonly List<Transform> bedParts = new List<Transform>();
+        // The kennel's parts, each a child of Home of its own so Hideout Interiors can move it (InteriorsLink): the bed
+        // (with the cushion and the shelter over it), each bowl, and each upgrade piece. They're built at Home's origin
+        // as laid out here; Interiors puts back where they were moved to, against Home, so they go where the kennel goes.
+        private Transform bedGroup;
+        private readonly List<Transform> upgradeParts = new List<Transform>();
+        // Whose kennel it is, for Interiors (the resident dogs' are set; the active dog's is the pack's active dog).
+        internal string AreaDogId, AreaDogName;
+
+        /// <summary>Where the dog lies: the bed, wherever it's been moved to (Home without one).</summary>
+        public Transform BedSpot => bedGroup != null ? bedGroup : Home;
         private Transform bedModel;
         private float bedRaised;
         private BoxCollider cushionBox;
@@ -76,7 +97,8 @@ namespace K9Companion
         public bool OnBed(Vector3 p, out float y)
         {
             y = 0;
-            if (cushionBox == null) return false;
+            // Off when the bed's hidden (Hideout Interiors): no bed to lie on, and its bounds are nothing.
+            if (cushionBox == null || !cushionBox.enabled) return false;
             Vector3 local = cushionBox.transform.InverseTransformPoint(p) - cushionBox.center;
             Vector3 half = cushionBox.size / 2;
             if (Mathf.Abs(local.x) > half.x || Mathf.Abs(local.z) > half.z) return false;
@@ -96,20 +118,21 @@ namespace K9Companion
         public List<Vector3> BedRoute(Vector3 from)
         {
             var route = new List<Vector3>();
-            if (Home == null) return route;
+            Transform bed = BedSpot;
+            if (bed == null) return route;
             if (hasShelter)
             {
-                Vector3 local = Home.InverseTransformPoint(from);
+                Vector3 local = bed.InverseTransformPoint(from);
                 float doorZ = shelterFrontZ + .2f;
-                if (local.z < shelterFrontZ) route.Add(Home.TransformPoint(new Vector3(Mathf.Sign(local.x == 0 ? 1 : local.x) * (shelterHalfX + .55f), 0, doorZ + .25f)));
-                route.Add(Home.TransformPoint(new Vector3(0, 0, doorZ)));
+                if (local.z < shelterFrontZ) route.Add(bed.TransformPoint(new Vector3(Mathf.Sign(local.x == 0 ? 1 : local.x) * (shelterHalfX + .55f), 0, doorZ + .25f)));
+                route.Add(bed.TransformPoint(new Vector3(0, 0, doorZ)));
             }
-            route.Add(Home.position);
+            route.Add(bed.position);
             return route;
         }
 
         /// <summary>Just outside the shelter's door, where a dog leaving its bed heads first; null without a shelter.</summary>
-        public Vector3? DoorStep => hasShelter && Home != null ? Home.TransformPoint(new Vector3(0, 0, shelterFrontZ + .35f)) : (Vector3?)null;
+        public Vector3? DoorStep => hasShelter && BedSpot != null ? BedSpot.TransformPoint(new Vector3(0, 0, shelterFrontZ + .35f)) : (Vector3?)null;
 
         /// <summary>The floor the whole kennel needs at a level: the bed and bowls first, then its furniture.</summary>
         public static IEnumerable<(Vector3 centre, Vector3 half)> Footprint(int level)
@@ -130,7 +153,10 @@ namespace K9Companion
                 Transform bone = model.Bone(boneName);
                 if (bone == null || model.Root == null) continue;
                 var mount = new GameObject("K9 camera lens " + key).transform;
-                mount.SetPositionAndRotation(model.Root.TransformPoint(lens), model.Root.rotation);
+                // Measured on the shepherd's gear: on another breed, as far from its chest as its size makes it.
+                Vector3 at = lens;
+                if (!model.Breed.IsShepherd) at = model.Root.InverseTransformPoint(bone.position) + (lens - ShepherdChest) * model.Breed.Size;
+                mount.SetPositionAndRotation(model.Root.TransformPoint(at), model.Root.rotation);
                 mount.SetParent(bone, true);
                 mounts[key] = mount;
             }
@@ -281,30 +307,32 @@ namespace K9Companion
         public void Update()
         {
             if (vest != null && vest.gameObject.activeSelf && spine != null)
-            { vest.position = spine.position; vest.rotation = spine.rotation * vestBind; vest.localScale = Vector3.one * Plugin.Scale.Value; }
-            // The kennel's lights go off and on, and dim, with the hideout lamp they were set from (its power).
-            if (lampReference != null)
-            {
-                bool on = lampReference.isActiveAndEnabled;
-                float dim = referenceIntensity > 0 ? lampReference.intensity / referenceIntensity : 1;
-                if (lamp != null) { lamp.enabled = on; lamp.intensity = lampIntensity * dim; }
-                if (doorLamp != null) { doorLamp.enabled = on; doorLamp.intensity = DoorLampIntensity * dim; }
-            }
+            { vest.position = spine.position; vest.rotation = spine.rotation * vestBind; vest.localScale = Vector3.one * (model != null ? model.Size : Plugin.Scale.Value); }
+            // The kennel's lights follow the hideout's light switch (KennelLights), like the areas' own lamps.
+            if (lamp != null || doorLamp != null) KennelLights.Apply(lamp, doorLamp, lampIntensity, DoorLampIntensity);
         }
 
         // ---- the kennel's lights ------------------------------------------------------------------------------------
 
         // A lamp under the ceiling over the kennel, lighting its front, like the lights the hideout's own areas have: set
-        // like the nearest of the hideout's lamps (colour, brightness, reach, shadows) and following it. With no hideout
-        // lamp about, a warm bulb of its own. The military kennel's caged lamp over its door lights up too.
-        private Light lamp, doorLamp, lampReference;
-        private float referenceIntensity, lampIntensity = 1.6f;
+        // like the nearest of the hideout's own lamps (brightness, reach), and switched, and coloured, by the hideout's
+        // light switch (KennelLights): fluorescent tubes or bulbs, off with the lights off or on candles. Another kennel's
+        // lamp is never taken as the one to match. With no hideout lamp about, a bulb of its own. The military kennel's
+        // caged lamp over its door lights up too. In a room that has its own lamps (the K9 kennels room) there's none.
+        private Light lamp, doorLamp;
+        internal bool NoLamp;
+        private float lampIntensity = 1.6f;
         private const float DoorLampIntensity = .9f;
         // The caged lamp over the military kennel's door, in the model's own space (kennel_models.props).
         private static readonly Vector3 DoorLampAt = new Vector3(0, .6f, .31f);
 
         private void PlaceLamp()
         {
+            if (NoLamp)
+            {
+                if (lamp != null) { UnityEngine.Object.Destroy(lamp.gameObject); lamp = null; }
+                return;
+            }
             if (lamp == null)
             {
                 var go = new GameObject("K9 kennel lamp");
@@ -313,26 +341,28 @@ namespace K9Companion
                 lamp.type = LightType.Point;
             }
             // Matched again wherever the kennel goes (moved into another room, it takes after that room's lamps). Only a
-            // lamp that is lit and lights a room counts, not a glow or an indicator.
-            lampReference = UnityEngine.Object.FindObjectsOfType<Light>()
+            // hideout lamp that is lit and lights a room counts: not a glow or an indicator, nor any of the kennels' lamps.
+            Light reference = UnityEngine.Object.FindObjectsOfType<Light>()
                 .Where(l => l.isActiveAndEnabled && (l.type == LightType.Point || l.type == LightType.Spot) && l.intensity >= .5f && l.range >= 3
-                            && l.gameObject.scene == Home.gameObject.scene && !l.transform.IsChildOf(Home) && !l.transform.IsChildOf(dog))
+                            && l.gameObject.scene == Home.gameObject.scene && !l.transform.IsChildOf(Home) && !l.transform.IsChildOf(dog)
+                            && !KennelLights.Ours(l))
                 .OrderBy(l => (l.transform.position - Home.position).sqrMagnitude).FirstOrDefault();
-            if (lampReference != null)
+            if (reference != null && (reference.transform.position - Home.position).sqrMagnitude < 30 * 30)
             {
-                lamp.color = lampReference.color; lamp.shadows = lampReference.shadows; lamp.renderMode = lampReference.renderMode;
-                lamp.cullingMask = lampReference.cullingMask; lamp.bounceIntensity = lampReference.bounceIntensity;
-                lamp.range = Mathf.Clamp(lampReference.range, 5, 9);
-                lampIntensity = Mathf.Clamp(lampReference.intensity, 1f, 3f); referenceIntensity = lampReference.intensity;
-                Plugin.Log.LogInfo($"Kennel lamp set like the hideout's {lampReference.name} ({Vector3.Distance(lampReference.transform.position, Home.position):0.0} m away): " +
-                                   $"intensity {lampReference.intensity:0.##}, range {lampReference.range:0.#}, {lampReference.shadows} shadows.");
+                lamp.renderMode = reference.renderMode; lamp.cullingMask = reference.cullingMask; lamp.bounceIntensity = reference.bounceIntensity;
+                lamp.range = Mathf.Clamp(reference.range, 5, 9);
+                lampIntensity = Mathf.Clamp(reference.intensity, 1f, 3f);
+                Plugin.Log.LogInfo($"Kennel lamp set like the hideout's {reference.name} ({Vector3.Distance(reference.transform.position, Home.position):0.0} m away): " +
+                                   $"intensity {reference.intensity:0.##}, range {reference.range:0.#}.");
             }
             else
             {
-                lamp.color = new Color(1f, .8f, .56f); lamp.range = 6; lamp.shadows = LightShadows.Soft; lampIntensity = 1.6f;
-                Plugin.Log.LogInfo("Kennel lamp: no lit hideout lamp to match; a warm bulb of its own.");
+                lamp.range = 6; lampIntensity = 1.6f;
+                Plugin.Log.LogInfo("Kennel lamp: no lit hideout lamp near to match; a lamp of its own.");
             }
-            lamp.enabled = true; lamp.intensity = lampIntensity;
+            // No shadows: with several dogs at home, a shadowed lamp each costs more than the hideout's own lights do.
+            lamp.shadows = LightShadows.None;
+            KennelLights.Apply(lamp, doorLamp, lampIntensity, DoorLampIntensity);
             // Under the ceiling (or at a room's height where there's none to find), a little out in front of the bed.
             float height = Physics.Raycast(Home.position + Vector3.up * .5f, Vector3.up, out RaycastHit ceiling, 4.5f, solidMask, QueryTriggerInteraction.Ignore)
                 ? ceiling.point.y - Home.position.y - .35f : 2.3f;
@@ -347,39 +377,41 @@ namespace K9Companion
             go.transform.position = t.TransformPoint(DoorLampAt);
             doorLamp = go.AddComponent<Light>();
             doorLamp.type = LightType.Point;
-            doorLamp.color = lamp != null ? lamp.color : new Color(1f, .85f, .65f);
-            doorLamp.range = 2.2f; doorLamp.shadows = LightShadows.None; doorLamp.intensity = DoorLampIntensity;
+            doorLamp.range = 2.2f; doorLamp.shadows = LightShadows.None;
+            KennelLights.Apply(lamp, doorLamp, lampIntensity, DoorLampIntensity);
         }
         // The kennel: bed, food bowl and water bowl, as new objects in the hideout scene (copies of the hideout's own pet
         // bed and bowls; HideoutProps). Nothing of the game's is changed; all of it is destroyed when the dog leaves the
         // hideout (Dispose).
         public void PlaceHome(Vector3 point, Quaternion rotation)
         {
+            NoLamp = KennelsRoom.Inside(point);   // the K9 kennels room has its own lamps
             if(Home != null) { Home.position=point; Home.rotation=rotation; Physics.SyncTransforms(); PlaceLamp(); return; }
-            Home=new GameObject("K9 kennel").transform;UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(Home.gameObject, dog.gameObject.scene);Home.position=point;Home.rotation=rotation;
+            Home=new GameObject(HomeName).transform;UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(Home.gameObject, dog.gameObject.scene);Home.position=point;Home.rotation=rotation;
             PlaceLamp();
             // The hideout's own pet bed (cat-sized, so stretched to fit the dog, long side along the way it lies);
             // without it, the bed from kennel.props.
             Bounds bed; float top=0;
             bedParts.Clear(); bedRaised = 0;
-            Transform hideoutBed=HideoutProps.Spawn(HideoutProps.Bed,Home,new Vector3(0,0,BedZ),out bed,turn:90,scale:BedStretch);
+            bedGroup=Part("Bed",Vector3.zero);
+            Transform hideoutBed=HideoutProps.Spawn(HideoutProps.Bed,bedGroup,new Vector3(0,0,BedZ),out bed,turn:90,scale:BedStretch*BedFit);
             bool placed=hideoutBed != null;
             bedModel=hideoutBed;
             if(placed) bedParts.Add(hideoutBed);
-            if(placed) top=HideoutProps.BedFloor*BedStretch.z;
+            if(placed) top=HideoutProps.BedFloor*BedStretch.z*BedFit;
             else
             {
-                props = PropModel.Load(Plugin.AssetFolder);
-                Transform modelBed=props != null && props.Measure("bed",out bed,out top) ? props.Spawn("bed",Home,new Vector3(0,0,BedZ),BedScale) : null;
+                if (props == null) props = PropModel.Load(Plugin.AssetFolder);
+                Transform modelBed=props != null && props.Measure("bed",out bed,out top) ? props.Spawn("bed",bedGroup,new Vector3(0,0,BedZ),BedScale*BedFit) : null;
                 placed=modelBed != null;
                 bedModel=modelBed;
                 if(placed) bedParts.Add(modelBed);
-                bed=new Bounds(new Vector3(0,0,BedZ),bed.size*BedScale); top*=BedScale;
+                bed=new Bounds(new Vector3(0,0,BedZ),bed.size*BedScale*BedFit); top*=BedScale*BedFit;
             }
             if(placed)
             {
                 // An invisible cushion, exactly as high as the bed's own, so the dog lies on the bed: not sunk into it, not floating.
-                var cushion=new GameObject("K9 bed cushion");cushion.transform.SetParent(Home,false);bedParts.Add(cushion.transform);
+                var cushion=new GameObject("K9 bed cushion");cushion.transform.SetParent(bedGroup,false);bedParts.Add(cushion.transform);
                 var box=cushion.AddComponent<BoxCollider>();box.center=new Vector3(0,top/2,BedZ);
                 box.size=new Vector3(bed.size.x*.62f,top,bed.size.z*.62f);
                 cushionBox=box;
@@ -388,35 +420,49 @@ namespace K9Companion
                 bowlZ=BedZ+bed.extents.z+DogHouseRoom/2+.2f;
                 foodFill=ModelBowl("Food bowl",new Vector3(-.19f,0,bowlZ),foodMaterial);
                 waterFill=ModelBowl("Water bowl",new Vector3(.19f,0,bowlZ),waterMaterial);
-                // What your interact key finds when you look at the bowls or the front of the bed (first person).
-                var zone=new GameObject("K9 kennel interaction"){layer=LayerMask.NameToLayer("Interactive")};
-                zone.transform.SetParent(Home,false);
-                var trigger=zone.AddComponent<BoxCollider>();trigger.isTrigger=true;
-                trigger.center=new Vector3(0,.35f,bowlZ-.25f);trigger.size=new Vector3(1.1f,.7f,.8f);
-                zone.AddComponent<KennelInteractive>();
             }
             else
             {
-                Primitive("Bed base",PrimitiveType.Cube,Home,new Vector3(0,.035f,-.18f),new Vector3(.85f,.07f,1.2f),leather);
-                Primitive("Bed cushion",PrimitiveType.Cube,Home,new Vector3(0,.08f,-.18f),new Vector3(.76f,.05f,1.1f),cushion);
-                foreach(float x in new[]{-.4f,.4f}) Primitive("Bed bolster",PrimitiveType.Cube,Home,new Vector3(x,.14f,-.18f),new Vector3(.1f,.16f,1.2f),cushion);
-                Primitive("Back bolster",PrimitiveType.Cube,Home,new Vector3(0,.14f,-.74f),new Vector3(.85f,.16f,.1f),cushion);
+                Primitive("Bed base",PrimitiveType.Cube,bedGroup,new Vector3(0,.035f,-.18f),new Vector3(.85f,.07f,1.2f),leather);
+                Primitive("Bed cushion",PrimitiveType.Cube,bedGroup,new Vector3(0,.08f,-.18f),new Vector3(.76f,.05f,1.1f),cushion);
+                foreach(float x in new[]{-.4f,.4f}) Primitive("Bed bolster",PrimitiveType.Cube,bedGroup,new Vector3(x,.14f,-.18f),new Vector3(.1f,.16f,1.2f),cushion);
+                Primitive("Back bolster",PrimitiveType.Cube,bedGroup,new Vector3(0,.14f,-.74f),new Vector3(.85f,.16f,.1f),cushion);
                 foodFill=Bowl("Food dish",new Vector3(-.65f,0,.5f),foodMaterial);
                 waterFill=Bowl("Water dish",new Vector3(.65f,0,.5f),waterMaterial);
             }
             BuildUpgrades();
             Physics.SyncTransforms();
         }
+        // One of the kennel's parts: a child of Home at 'at' (its frame Home's).
+        private Transform Part(string name,Vector3 at)
+        {
+            var part=new GameObject(name).transform;part.SetParent(Home,false);part.localPosition=at;
+            return part;
+        }
+        // What your interact key finds when you look at a bowl (first person): the bowl and a little towards the bed.
+        private void Interaction(Transform bowl)
+        {
+            if(Resident) return;
+            var zone=new GameObject("K9 kennel interaction"){layer=LayerMask.NameToLayer("Interactive")};
+            zone.transform.SetParent(bowl,false);
+            var trigger=zone.AddComponent<BoxCollider>();trigger.isTrigger=true;
+            trigger.center=new Vector3(0,.35f,-.25f);trigger.size=new Vector3(.55f,.7f,.8f);
+            zone.AddComponent<KennelInteractive>();
+        }
         private Transform ModelBowl(string name,Vector3 position,Material fill)
         {
-            if(HideoutProps.Spawn(HideoutProps.Bowl,Home,position,out _) == null) props?.Spawn("bowl",Home,position,1f);
-            return Primitive(name+" contents",PrimitiveType.Cylinder,Home,position+Vector3.up*.03f,new Vector3(.17f,.006f,.17f),fill);
+            Transform bowl=Part(name,position);
+            if(HideoutProps.Spawn(HideoutProps.Bowl,bowl,Vector3.zero,out _) == null) props?.Spawn("bowl",bowl,Vector3.zero,1f);
+            Interaction(bowl);
+            return Primitive(name+" contents",PrimitiveType.Cylinder,bowl,Vector3.up*.03f,new Vector3(.17f,.006f,.17f),fill);
         }
         private Transform Bowl(string name,Vector3 position,Material fill)
         {
-            var basePart=Primitive(name,PrimitiveType.Cylinder,Home,position+Vector3.up*.025f,new Vector3(.3f,.025f,.3f),steel);
-            var rim=Ring(name+" rim",Home,.145f,.018f,steel);rim.localPosition=position+Vector3.up*.07f;
-            return Primitive(name+" contents",PrimitiveType.Cylinder,Home,position+Vector3.up*.05f,new Vector3(.255f,.01f,.255f),fill);
+            Transform bowl=Part(name,position);
+            Primitive(name+" base",PrimitiveType.Cylinder,bowl,Vector3.up*.025f,new Vector3(.3f,.025f,.3f),steel);
+            var rim=Ring(name+" rim",bowl,.145f,.018f,steel);rim.localPosition=Vector3.up*.07f;
+            Interaction(bowl);
+            return Primitive(name+" contents",PrimitiveType.Cylinder,bowl,Vector3.up*.05f,new Vector3(.255f,.01f,.255f),fill);
         }
         // ---- cosmetics (Tactical K9 Facility) ---------------------------------------------------------------------
 
@@ -429,7 +475,6 @@ namespace K9Companion
 
         private int kennelLevel;
         private int solidMask = Physics.DefaultRaycastLayers;
-        private Transform upgrades;
 
         /// <summary>
         /// What the built kennel level adds around the bed: a toy box (any kennel); a cabinet for the dog's armour, a food
@@ -448,17 +493,35 @@ namespace K9Companion
 
         private void BuildUpgrades()
         {
-            if (upgrades != null) UnityEngine.Object.Destroy(upgrades.gameObject);
-            upgrades = null;
+            // Taken off Home now (it's destroyed at the frame's end): the new pieces get the same names, and Interiors
+            // finds its things by name.
+            foreach (Transform part in upgradeParts)
+                if (part != null) { part.gameObject.SetActive(false); part.SetParent(null, false); UnityEngine.Object.Destroy(part.gameObject); }
+            upgradeParts.Clear();
             RaiseBed(0);
             hasShelter = false;
             if (bedModel != null) bedModel.gameObject.SetActive(true);
-            if (kennelLevel < 1) return;
-            upgrades = new GameObject("Kennel upgrades").transform;
-            upgrades.SetParent(Home, false);
+            if (kennelLevel >= 1) AddUpgrades();
+            Physics.SyncTransforms();
+            OfferToInteriors();
+        }
+
+        // The kennel to Hideout Interiors as an area of its own, so its parts can be moved (again after every rebuild:
+        // it puts back where they were moved to).
+        private void OfferToInteriors()
+        {
+            if (Home == null) return;
+            string id = AreaDogId, name = AreaDogName;
+            if (id == null) { PackDog active = Pack.Active; id = active?.Id; name = active?.Shown; }
+            if (string.IsNullOrEmpty(id)) return;
+            InteriorsLink.Area("k9.kennel." + id, (string.IsNullOrEmpty(name) ? "the dog" : name) + "'s kennel", Home);
+        }
+
+        private void AddUpgrades()
+        {
             if (models == null) models = PropModel.Load(Plugin.AssetFolder, "kennel_models.props");
             Piece("Toy box", kennelLevel >= 3 ? ToyBoxBesideDoorAt : ToyBoxAt, new Vector3(.62f, .28f, .36f), p => Model("toybox", p, -15), null);
-            if (kennelLevel < 2) { Physics.SyncTransforms(); return; }
+            if (kennelLevel < 2) return;
             Material olive = Mat(new Color(.24f, .26f, .18f)), dark = Mat(new Color(.07f, .07f, .07f)), bin = Mat(new Color(.12f, .24f, .42f));
             Piece("K9 armour cabinet", CabinetAt, new Vector3(.61f, .96f, .34f), p => Copy(HideoutProps.Cabinet, p), p =>
             {
@@ -475,7 +538,7 @@ namespace K9Companion
             Piece("Dog food bag", new Vector3(.55f, 0, bowlZ + .07f), new Vector3(.4f, .62f, .32f), p => Model("foodbag", p, -25) || Copy(HideoutProps.FoodBag, p, turn: -25), null);
             // The military kennel from level 3 (the dog house if its model is missing).
             if (kennelLevel < 3 || !Shelter("crate")) Shelter("doghouse");
-            if (kennelLevel < 3) { Physics.SyncTransforms(); return; }
+            if (kennelLevel < 3) return;
             Material white = Mat(new Color(.85f, .85f, .82f)), red = Mat(new Color(.7f, .08f, .06f));
             Piece("Veterinary table", TableAt, new Vector3(1.22f, .9f, .62f), p =>
             {
@@ -493,7 +556,6 @@ namespace K9Companion
                 Primitive("Red cross", PrimitiveType.Cube, p, new Vector3(.2f, .92f, -.101f), new Vector3(.1f, .03f, .004f), red);
                 Primitive("Red cross", PrimitiveType.Cube, p, new Vector3(.2f, .92f, -.101f), new Vector3(.03f, .1f, .004f), red);
             });
-            Physics.SyncTransforms();
         }
 
         // A shelter model over the bed, the door facing the bowls. The dog house is stretched to the bed: as wide and deep
@@ -504,8 +566,10 @@ namespace K9Companion
         {
             if (models == null || !models.Measure(name, out Bounds house, out _) || house.size.x <= 0 || house.size.z <= 0) return false;
             bool military = name == "crate";
+            // Part of the bed: the dog lies in it, so it goes where the bed goes.
             var piece = new GameObject(military ? "Military K9 kennel" : "Dog house").transform;
-            piece.SetParent(upgrades, false);
+            piece.SetParent(bedGroup != null ? bedGroup : Home, false);
+            upgradeParts.Add(piece);
             piece.localPosition = new Vector3(bedBounds.center.x, 0, bedBounds.center.z);
             Transform t = models.Spawn(name, piece, Vector3.zero, 1f);
             if (t == null) { UnityEngine.Object.Destroy(piece.gameObject); return false; }
@@ -562,7 +626,8 @@ namespace K9Companion
                 Vector3 centre = Home.TransformPoint(grounded + Vector3.up * (size.y / 2 + .03f));
                 if (checkFloor && Blocked(centre, size / 2 * .95f)) continue;
                 var piece = new GameObject(name).transform;
-                piece.SetParent(upgrades, false); piece.localPosition = grounded;
+                piece.SetParent(Home, false); piece.localPosition = grounded;
+                upgradeParts.Add(piece);
                 if (!model(piece)) build?.Invoke(piece);
                 return;
             }

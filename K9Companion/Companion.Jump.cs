@@ -33,21 +33,23 @@ namespace K9Companion
             }
         }
 
-        private static readonly JumpClip StandJump = new JumpClip
+        // The breed's three jumps (Breed: measured by tools/measure_jumps.py and convert_breed.py), made once per breed.
+        private JumpClip[] jumps;
+        private Breed jumpsOf;
+        private JumpClip[] Jumps
         {
-            Name = "Jump_Stand", TakeOff = .256f, Land = .581f, Exit = Gait.WalkSlow,
-            Travel = new[] { 0f, -.06f, -.105f, .031f, .309f, .608f, .94f, 1.287f, 1.584f, 1.849f, 2.096f, 2.323f, 2.527f, 2.696f, 2.775f, 2.778f, 2.778f }
-        };
-        private static readonly JumpClip TrotJump = new JumpClip
-        {
-            Name = "Jump_Trot", TakeOff = .324f, Land = .824f, Exit = Gait.Trot,
-            Travel = new[] { 0f, .229f, .459f, .711f, .976f, 1.242f, 1.507f, 1.772f, 2.037f, 2.302f, 2.567f, 2.833f, 3.098f, 3.363f, 3.628f, 3.893f, 4.034f }
-        };
-        private static readonly JumpClip RunJump = new JumpClip
-        {
-            Name = "Jump_Run", TakeOff = .292f, Land = .833f, Exit = Gait.Run,
-            Travel = new[] { 0f, .457f, .874f, 1.239f, 1.572f, 1.867f, 2.177f, 2.508f, 2.85f, 3.199f, 3.549f, 3.893f, 4.229f, 4.583f, 4.976f, 5.38f, 5.511f }
-        };
+            get
+            {
+                Breed b = Shape;
+                if (jumps != null && jumpsOf == b) return jumps;
+                JumpClip Make(string name, Breed.JumpData d, Gait exit) => new JumpClip { Name = name, TakeOff = d.TakeOff, Land = d.Land, Travel = d.Travel, Exit = exit };
+                jumpsOf = b;
+                return jumps = new[] { Make("Jump_Stand", b.StandJump, Gait.WalkSlow), Make("Jump_Trot", b.TrotJump, Gait.Trot), Make("Jump_Run", b.RunJump, Gait.Run) };
+            }
+        }
+        private JumpClip StandJump => Jumps[0];
+        private JumpClip TrotJump => Jumps[1];
+        private JumpClip RunJump => Jumps[2];
 
         // Clears this much by the animation alone (its paws at the top of the jump); anything higher up to MaxObstacle is
         // cleared by lifting the whole dog a little more. All in metres at the dog's normal size.
@@ -125,7 +127,7 @@ namespace K9Companion
             direction.y = 0;
             if (direction.sqrMagnitude < .01f || dog == null) return false;
             direction.Normalize();
-            float s = Mathf.Max(.3f, Plugin.Scale.Value);
+            float s = Mathf.Max(.3f, DogSize);
             if (!GroundAt(at, out Vector3 ground)) return false;
             float y0 = ground.y;
             // Turning a long way: from a stand, turning first. Otherwise the jump that goes with its pace.
@@ -135,8 +137,22 @@ namespace K9Companion
             bool any = false;
             foreach (JumpClip clip in moving == StandJump ? new[] { StandJump } : new[] { moving, StandJump })
             {
-                if (!Survey(at, y0, direction, clip.At(1) * StretchMax * s, s, out float near, out float far, out float top, out float wall)) return false;
-                if (float.IsInfinity(near) && !anyway) return false;   // nothing in the way: no reason to jump
+                if (!Survey(at, y0, direction, clip.At(1) * StretchMax * s, s, out float near, out float far, out float top, out float wall))
+                {
+                    // Something low enough to jump, but it runs on past this jump's reach from here (a small dog's standing
+                    // jump, a few metres off): nearer, it'd be a jump, so it runs up to it first. (It gave up instead, and
+                    // went the long way round.)
+                    if (float.IsNaN(far) && !any) tooFar = near;
+                    return false;
+                }
+                if (float.IsInfinity(near) && !anyway)
+                {
+                    // Nothing in the way within this jump's reach. But it's only asked when it's stuck or has no way (or a
+                    // long one): something low a few metres further on, past a small dog's standing jump, is one to run up
+                    // to. (It stood still in front of a low wall across a corridor until it was teleported.)
+                    if (!any && target != null) tooFar = LowAhead(at, y0, direction, s, Flat(at, target.Value));
+                    return false;
+                }
                 // How much to stretch it: leaving the ground before what's in the way, landing past it.
                 float up = clip.At(clip.TakeOff) * s, down = clip.At(clip.Land) * s;
                 float most = float.IsInfinity(near) ? StretchMax : (near + .05f) / Mathf.Max(.05f, up);
@@ -168,6 +184,18 @@ namespace K9Companion
                 return true;
             }
             return false;
+        }
+
+        // How far off something low enough to jump starts, further along than a jump from here reaches (up to 8 m, and not
+        // past where it's going); NaN if there's nothing, or it's too high, or a gap too long.
+        private float LowAhead(Vector3 at, float y0, Vector3 direction, float s, float before)
+        {
+            bool clear = Survey(at, y0, direction, Mathf.Min(8f, before), s, out float near, out float far, out float top, out _);
+            if (float.IsInfinity(near) || near > before) return float.NaN;
+            // Something standing up out of the floor only: not the edge of a drop (a stairwell beside the flight you're on).
+            if (top <= y0 + StepOver * s) return float.NaN;
+            // Back down past it, or something low that goes on past the 8 m (as a jump from here would see it, nearer).
+            return clear || float.IsNaN(far) ? near : float.NaN;
         }
 
         // Along the way: where the first thing too high to step over starts (near), where clear ground starts again past
@@ -204,7 +232,9 @@ namespace K9Companion
                 if (last - h > StepOver * 2 * s) { near = d - Step; far = d; top = y0; return true; }
                 last = h;
             }
-            // Never back down within reach (a long gap) is no jump; nothing in the way at all is open ground.
+            // Never back down within reach (a long gap, or something low that goes on past it: far is NaN then) is no jump;
+            // nothing in the way at all is open ground.
+            if (inside) far = float.NaN;
             return !inside;
         }
 
@@ -264,7 +294,7 @@ namespace K9Companion
             direction.y = 0;
             if (direction.sqrMagnitude < .01f) direction = Quaternion.Euler(0, yaw, 0) * Vector3.forward;
             direction.Normalize();
-            float s = Mathf.Max(.3f, Plugin.Scale.Value);
+            float s = Mathf.Max(.3f, DogSize);
             Vector3 at = dog.transform.position;
             float y0 = GroundAt(at, out Vector3 ground) ? ground.y : at.y;
             JumpClip clip = shownSpeed < 1.6f ? StandJump : shownSpeed < 5f ? TrotJump : RunJump;
@@ -310,7 +340,7 @@ namespace K9Companion
         // The jump owns the frame: the clip plays, the dog travels as the animation does, over the arc to where it lands.
         private void TickJump(float dt)
         {
-            float s = Mathf.Max(.3f, Plugin.Scale.Value);
+            float s = Mathf.Max(.3f, DogSize);
             bool done = model.Tick(jumpClip.Name, 1, dt, false);
             float u = done ? 1 : model.Progress;
             // From a stand it turns to face the jump while it gathers itself.
@@ -335,7 +365,7 @@ namespace K9Companion
             if (!done) return;
             stance = Stance.Stand;
             // On it goes at the pace it landed at.
-            speed = shownSpeed = jumpClip == StandJump ? 0 : Locomotion.Speed(jumpClip.Exit, Plugin.Tuning);
+            speed = shownSpeed = jumpClip == StandJump ? 0 : Locomotion.Speed(jumpClip.Exit, DogTuning);
             gait = jumpClip.Exit;
             corners = Array.Empty<Vector3>(); corner = 0; nextPath = 0;
             jumpClip = null;

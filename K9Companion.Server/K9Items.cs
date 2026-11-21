@@ -222,7 +222,7 @@ public sealed class K9Items(CustomItemService items, TemplateTable templates, Lo
         if (filter == null) return;
         filter.Filter = LockerCategories.Select(c => new MongoId(c)).Concat(DogGear.JacketIds).Concat(DogGear.KitIds).Concat(DogGear.Collars.Keys)
             .Concat(new[] { K9Ids.VetKit, K9Ids.Treats, K9Ids.PremiumFood, K9Ids.BedLiner, K9Ids.ThermalBed, K9Ids.TrainingKit }).ToHashSet();
-        filter.ExcludedFilter = new HashSet<MongoId> { DogGear.Holder, K9Ids.ArmourLocker, K9Ids.PremiumLocker };
+        filter.ExcludedFilter = new HashSet<MongoId> { DogGear.Holder, Pack.RosterHolder, K9Ids.ArmourLocker, K9Ids.PremiumLocker };
     }
 
     private bool Clone(string cloneOf, MongoId id, string name, int price, LocaleDetails text)
@@ -435,7 +435,7 @@ public sealed class GearItems(CustomItemService items, TemplateTable templates, 
                 grid.CellsH = j.GridWidth; grid.CellsV = j.GridHeight;
                 // No jacket inside a jacket.
                 var filter = grid.Filters?.FirstOrDefault();
-                if (filter != null) filter.ExcludedFilter = (filter.ExcludedFilter ?? new HashSet<MongoId>()).Union(DogGear.JacketIds.Append(DogGear.Holder)).ToHashSet();
+                if (filter != null) filter.ExcludedFilter = (filter.ExcludedFilter ?? new HashSet<MongoId>()).Union(DogGear.JacketIds.Append(DogGear.Holder).Append(Pack.RosterHolder)).ToHashSet();
             }
         }
 

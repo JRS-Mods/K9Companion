@@ -17,10 +17,40 @@ namespace K9Companion
         // How hard it brakes for the spot it's going to (m/s2): usually, and at the end of a rush.
         private const float Braking = 6f, HardBraking = 16f;
 
-        private static readonly float[] TurnL =
-            { 0, .061f, .193f, .319f, .409f, .491f, .569f, .646f, .730f, .820f, .900f, .954f, .979f, .991f, .998f, 1, 1, 1, 1, 1, 1 };
-        private static readonly float[] TurnR =
-            { 0, .093f, .278f, .416f, .508f, .588f, .662f, .734f, .810f, .900f, .973f, .992f, .998f, 1, 1, 1, 1, 1, 1, 1, 1 };
+        // This dog's breed (its model's): its turns, gaits, jumps and size (Breed).
+        internal Breed Shape => model?.Breed ?? Breed.Shepherd;
+        // Its gaits' ground speeds go with its body (a young dog's strides are shorter, so it's slower; a grown one's
+        // longer), so its feet keep to the ground at any size.
+        internal Tuning DogTuning
+        {
+            get
+            {
+                Tuning t = Plugin.TuningFor(Shape);
+                float grown = model?.Growth ?? 1;
+                if (t.Authored != null && Mathf.Abs(grown - 1) > .001f)
+                {
+                    if (scaledAuthored == null || scaledFor != t.Authored || scaledBy != grown)
+                    { scaledFor = t.Authored; scaledBy = grown; scaledAuthored = t.Authored.Select(a => a * grown).ToArray(); }
+                    t.Authored = scaledAuthored;
+                }
+                return t;
+            }
+        }
+        private float[] scaledAuthored, scaledFor; private float scaledBy;
+        // Its size against the shepherd at Scale 1: what's sized for the shepherd (jumps it clears, hitboxes) goes by this.
+        internal float DogSize => Plugin.Scale.Value * Shape.Size * (model?.Growth ?? 1);
+
+        // The settings as they apply to this breed: how much it takes, and how hard it bites.
+        private DogRules Breedwise(DogRules r)
+        {
+            Breed b = model?.Breed ?? Pack.ActiveBreed;
+            // A young dog has less in it and bites softer (Growth).
+            float strength = Growth.ActiveStrength;
+            r.Health *= b.Health * strength;
+            r.BitesToKill = Mathf.Max(1, r.BitesToKill / (b.Bite * strength));
+            r.BossBitesToKill = Mathf.Max(1, r.BossBitesToKill / (b.Bite * strength));
+            return r;
+        }
 
         private GameWorld world;
         private HideoutPlayer hideoutOwner;
@@ -28,6 +58,8 @@ namespace K9Companion
         private bool IsHideout => hideoutOwner != null;
         internal void BindHideout(HideoutPlayer owner) { hideoutOwner = owner; boundHideout = true; nextTry = Time.time + 1; }
         internal HideoutPlayer HideoutOwner => hideoutOwner;
+        // Where its kennel stands (the hideout's dog, once placed): the other dogs' kennels keep clear of it.
+        internal Transform KennelHome => decor?.Home;
         private bool boundHideout, wasShown;
         private static HideoutScreenRear hideoutScreen;
         private static float nextScreenLook;
@@ -160,7 +192,7 @@ namespace K9Companion
             TickSniff(player);
             TickRoam();
             Vector3 start = dog.transform.position;
-            Tuning tuning = Plugin.Tuning;
+            Tuning tuning = DogTuning;
             // A hungry or thirsty dog in combat mode is slower; NeedsFactor is 1 otherwise.
             float fitness = NeedsFactor * jacketSpeed;
             tuning.Walk *= fitness; tuning.Run *= fitness; tuning.Sprint *= fitness;
@@ -270,7 +302,7 @@ namespace K9Companion
             dog.transform.rotation = Quaternion.Euler(0, yaw, 0);
         }
 
-        private void Animate(float dt) => Animate(dt, Plugin.Tuning);
+        private void Animate(float dt) => Animate(dt, DogTuning);
 
         private void Animate(float dt, Tuning tuning)
         {
@@ -306,7 +338,7 @@ namespace K9Companion
                     return;
                 case Stance.Turn:
                     bool done = model.Tick(turnClip, HasTask || hunt != null ? HurriedTurn : TurnPlayback, dt, false);
-                    yaw = turnFrom + turnAngle * Curve(turnClip == "Trans_TurnL90" ? TurnL : TurnR, done ? 1 : model.Progress);
+                    yaw = turnFrom + turnAngle * Curve(turnClip == "Trans_TurnL90" ? Shape.TurnL : Shape.TurnR, done ? 1 : model.Progress);
                     if (done) { stance = Stance.Stand; yawRate = 0; }
                     return;
                 case Stance.Jump: return;   // TickJump plays it
@@ -317,7 +349,7 @@ namespace K9Companion
             // Gait and playback come from the distance actually covered, so feet match the ground.
             gait = Locomotion.Pick(s, gait, stalkLow || (crouching && !HasTask), tuning);
             string clip = Locomotion.Clip(gait);
-            model.TickGait(clip, clip + (lean < 0 ? "_L" : "_R"), Mathf.Abs(lean), Locomotion.Playback(gait, s), dt);
+            model.TickGait(clip, clip + (lean < 0 ? "_L" : "_R"), Mathf.Abs(lean), Locomotion.Playback(gait, s, tuning), dt);
         }
 
         private bool TryTurn(Vector3 dir, float threshold)
@@ -418,7 +450,8 @@ namespace K9Companion
                 {
                     Vector3[] c = walkPath.corners;
                     for (int i = 1; i < c.Length; i++) walkDistance += Vector3.Distance(c[i - 1], c[i]);
-                    walkDistance += Flat(b.position, target);
+                    // From the dog itself, too: off the navmesh (on a beam, a ledge) the nearest navmesh may be a step off.
+                    walkDistance += Flat(b.position, target) + Vector3.Distance(from, a.position);
                 }
             }
             // Off the navmesh, on a route of its own that ends at you (down a steep stair the navmesh leaves out): what's
@@ -433,6 +466,11 @@ namespace K9Companion
                     return Mathf.Max(straight, left + Flat(p, target) + Mathf.Abs(from.y - target.y));
                 }
             }
+            // No walk to measure (off the navmesh, its own route used up) and a floor above or below you: not beside you,
+            // however close that looks. It sat on a ledge 2 m over your head at the foot of a stair, for good; now it keeps
+            // coming, and if it can't, it's lost and comes to you as it does then.
+            float rise = Mathf.Abs(from.y - target.y);
+            if (walkDistance == 0 && rise > 1.2f) return Mathf.Max(straight, Flat(from, target) + rise * 2f);
             return Mathf.Max(straight, walkDistance);
         }
         private bool legsRoute;   // following a floor route off the navmesh (raid)
@@ -576,11 +614,14 @@ namespace K9Companion
             // A hideout dog is its own: one made ready for a raid that didn't happen isn't needed.
             if (IsHideout) DogPreload.Release();
             prepared = IsHideout ? null : DogPreload.Take();
+            // Made ready as another dog (you changed dogs since): this one is made now instead.
+            if (prepared != null && (prepared.Model == null || prepared.Model.Breed != Pack.ActiveBreed || prepared.Model.Coat != Pack.ActiveCoat))
+            { prepared.Dispose(); prepared = null; }
             dog = prepared?.Dog ?? new GameObject("K9 Companion dog");
             if (!IsHideout) dog.transform.SetParent(world.transform, true);
             else UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(dog, gameObject.scene);
             dog.transform.position = point;
-            model = prepared?.Model ?? DogModel.Load(Plugin.AssetFolder, dog.transform, Plugin.Scale.Value);
+            model = prepared?.Model ?? DogModel.Load(Pack.ActiveBreed, Pack.ActiveCoat, dog.transform, Plugin.Scale.Value, Growth.ActiveScale);
             Teleport(point, target);
             dog.SetActive(true);
             Plugin.Log.LogInfo("K9 dog spawned" + (prepared != null ? " (ready since the loading screen)." : "."));
@@ -613,24 +654,36 @@ namespace K9Companion
 
     internal enum Gait { Sneak, WalkSlow, Walk, Trot, Run, Sprint }
 
-    internal struct Tuning { public float Walk, Run, Sprint, Follow, RunFrom, SprintFrom; }
+    internal struct Tuning
+    {
+        public float Walk, Run, Sprint, Follow, RunFrom, SprintFrom;
+        // The breed's own gait speeds (Breed.Authored) and how its gaits are played (Breed.Cadence and the rest).
+        public float[] Authored;
+        public float Cadence, Stride, Burst, Stretch, MaxPlayback;
+    }
 
     internal static class Locomotion
     {
-        // Ground speed (m/s) each in-place clip was authored at, measured from the root-motion clips by tools/measure_gaits.py.
-        private static readonly float[] Authored = { .264f, .408f, .753f, 2.884f, 8.01f, 11.348f };
+        // Ground speed (m/s) each in-place clip was authored at (the breed's, Breed.Authored; tools/measure_gaits.py, convert_breed.py).
+        private static float[] Authored(Tuning t) => t.Authored ?? Breed.Shepherd.Authored;
         private static readonly string[] Clips = { "Loco_Sneak", "Loco_WalkSlow", "Loco_Walk", "Loco_Trot", "Loco_Run", "Loco_Sprint" };
-        // The sneak's stride is long and its clip very slow: quickened it's a crouched stalk at a dog's normal cadence, and
-        // the feet still match the ground, since playback follows the speed.
-        private const float SneakStretch = 5.5f;
 
         private static float Clamp(float v, float min, float max) => Math.Max(min, Math.Min(max, v));
+        private static float Or(float v, float fallback) => v > 0 ? v : fallback;
         public static string Clip(Gait g) => Clips[(int)g];
-        public static float Speed(Gait g, Tuning t) => Authored[(int)g] * (g <= Gait.Walk ? t.Walk : g == Gait.Sprint ? t.Sprint : t.Run);
-        // Feet stay planted when playback follows the real ground speed, multipliers included.
-        public static float Playback(Gait g, float speed) => Clamp(speed / Authored[(int)g], .3f, g == Gait.Sneak ? SneakStretch + .3f : 2.5f);
+        // Ground one cycle of the clip covers, per second of the clip: run and gallop strides carry a little further.
+        private static float Ground(Gait g, Tuning t) => Authored(t)[(int)g] * (g >= Gait.Run ? Or(t.Stride, 1) : 1);
+        // How quickly the breed steps in each gait, against the clip as made: its natural cadence, the sprint quicker.
+        private static float Quicken(Gait g, Tuning t) => Or(t.Cadence, 1) * (g == Gait.Sprint ? Or(t.Burst, 1) : 1);
+        public static float Speed(Gait g, Tuning t) => Ground(g, t) * Quicken(g, t) * (g <= Gait.Walk ? t.Walk : g == Gait.Sprint ? t.Sprint : t.Run);
+        // Feet stay planted when playback follows the real ground speed, multipliers included; never quickened past what
+        // still looks like a dog (a pug's gallop played 2.5 times over looked like a film run fast, skipping frames).
+        public static float Playback(Gait g, float speed, Tuning t) => Clamp(speed / Ground(g, t), .3f, g == Gait.Sneak ? Or(t.Stretch, 5.5f) + .3f : Or(t.MaxPlayback, 2.5f));
+        // The sneak's stride is long and its clip slow: quickened it's a crouched stalk at a dog's normal step rate, and
+        // the feet still match the ground, since playback follows the speed. This is as quick as it stalks.
+        private static float SneakTop(Tuning t) => Authored(t)[(int)Gait.Sneak] * t.Walk * Or(t.Stretch, 5.5f);
         // The fastest it can go keeping low.
-        public static float StalkSpeed(Tuning t) => Speed(Gait.Sneak, t) * SneakStretch * .9f;
+        public static float StalkSpeed(Tuning t) => SneakTop(t) * .9f;
 
         // 0 = near (walk/match pace), 1 = run, 2 = sprint. Hysteresis keeps a dog on a band edge from flickering.
         public static int Band(float distance, int current, Tuning t)
@@ -658,7 +711,7 @@ namespace K9Companion
 
         public static Gait Pick(float speed, Gait current, bool crouch, Tuning t)
         {
-            if (crouch && speed <= Speed(Gait.Sneak, t) * SneakStretch) return Gait.Sneak;
+            if (crouch && speed <= SneakTop(t)) return Gait.Sneak;
             Gait best = Gait.Walk;
             float bestScore = float.MaxValue;
             for (Gait g = Gait.WalkSlow; g <= Gait.Sprint; g++)

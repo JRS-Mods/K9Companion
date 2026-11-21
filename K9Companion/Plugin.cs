@@ -14,12 +14,14 @@ using UnityEngine;
 namespace K9Companion
 {
     [BepInPlugin(Id, "JRS-K9Companion", Version)]
-    [BepInDependency("jrs.hideoutextensions", BepInDependency.DependencyFlags.SoftDependency)]
+    // The dogs live in a Hideout Extensions room of their own (KennelsRoom), and the kennel moves from the overview with it.
+    [BepInDependency("jrs.hideoutextensions", "1.3.0")]
     [BepInDependency("com.fika.core", BepInDependency.DependencyFlags.SoftDependency)]
+    [BepInDependency("jrs.hideoutinteriors", BepInDependency.DependencyFlags.SoftDependency)]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id = "jrs.k9companion";
-        public const string Version = "1.4.0";
+        public const string Version = "1.5.0";
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> Active, CombatMode, SurvivalNeeds, AutoFeedInHideout, CarryOverInjuries;
         internal static ConfigEntry<DogApproach> ApproachMode;
@@ -43,6 +45,7 @@ namespace K9Companion
         internal static ConfigEntry<KeyboardShortcut> Stay, Lie, Rename, Pet, Feed, Water, DogCamKey;
         internal static ConfigEntry<bool> DogCamShow;
         internal static ConfigEntry<bool> SoloRaidsOnly, DownedInsteadOfKilled, HealthBar, HealthBarFade, GodMode, ControlAfterDeath, SnowOnDog;
+        internal static ConfigEntry<bool> ScrollingTabs, KennelFoundInRaid;
         internal static ConfigEntry<KeyboardShortcut> LeaveDog, DogJump, DogDoor;
         internal static ConfigEntry<HealthBarPlace> HealthBarAt;
         internal static ConfigEntry<KeyboardShortcut> Bring;
@@ -57,15 +60,20 @@ namespace K9Companion
         internal static ConfigEntry<float> DogCamNudgeX, DogCamNudgeY;
         private ConfigEntry<KeyboardShortcut> Key(string name, KeyCode key, string description, params KeyCode[] modifiers)
             => Config.Bind("Controls", name, new KeyboardShortcut(key, modifiers), description);
+        private ConfigEntry<KeyboardShortcut> AdvKey(string name, KeyCode key, string description, params KeyCode[] modifiers)
+            => Config.Bind("Controls", name, new KeyboardShortcut(key, modifiers), Adv(description));
 
-        // Fine-tuning that the F12 window keeps out of sight until "Advanced settings" is ticked.
+        // Fine-tuning that the F12 window keeps out of sight until "Advanced settings" is ticked. Shown without it: the
+        // dog on or off (raids, hideout, solo), combat mode, aggression and god mode, hunger and thirst, found-in-raid
+        // kennel materials, the health bar, the scrolling tab bar, sound on and its volume, and the recall, stay and
+        // camera keys. Everything else is behind it.
         private static ConfigDescription Adv(string text, AcceptableValueBase range = null)
             => new ConfigDescription(text, range, new ConfigurationManagerAttributes { IsAdvanced = true });
 
         private void Awake()
         {
             Log = Logger; instance = this;
-            Active = Config.Bind("General", "Enabled", true, Adv("Spawn your companion in raids."));
+            Active = Config.Bind("General", "Enabled", true, "Spawn your companion in raids.");
             SoloRaidsOnly = Config.Bind("General", "Solo raids only", false,
                 "On: the dog only comes on raids where you're the only player, and stays home in a Fika group (also in the DOG tab, " +
                 "under Behaviour: GROUP RAIDS). This is your own dog only: to keep every dog out of group raids, the server's owner sets soloOnly " +
@@ -83,14 +91,14 @@ namespace K9Companion
             SprintSpeed = Config.Bind("Movement", "SprintSpeedMultiplier", 1f,
                 Adv("Scales sprinting speed; animation playback follows.", new AcceptableValueRange<float>(.5f, 2f)));
             CombatMode = Config.Bind("Combat", "CombatMode", false,
-                Adv("Off: the dog only follows and obeys commands. AI ignore it, it cannot attack, and it cannot be hurt or killed. " +
-                "On: the dog can attack, hostile AI can shoot it, and it can always be killed."));
+                "Off: the dog only follows and obeys commands. AI ignore it, it cannot attack, and it cannot be hurt or killed. " +
+                "On: the dog can attack, hostile AI can shoot it, and it can always be killed.");
             // As a working patrol dog: it alerts its handler and goes in on command (or, trained for handler protection,
             // when you're attacked); it never picks fights on its own unless set to Aggressive.
             DogAggression = Config.Bind("Combat", "Dog aggression", Aggression.Passive,
-                Adv("Only used when CombatMode is on. Passive: alerts you to enemies (growls, barks, tells you where) and attacks only when " +
+                "Only used when CombatMode is on. Passive: alerts you to enemies (growls, barks, tells you where) and attacks only when " +
                 "ordered (Over There). Defensive: also goes for enemies that target, shoot or hurt you or the dog. Aggressive: also " +
-                "attacks any hostile AI it detects within the engagement distance."));
+                "attacks any hostile AI it detects within the engagement distance.");
             EngageDistance = Config.Bind("Combat", "Maximum engagement distance", DogRules.DefaultEngage,
                 Adv("How far from you, in metres, the dog will go after an enemy.", new AcceptableValueRange<float>(5f, 60f)));
             ApproachMode = Config.Bind("Combat", "Approach", DogApproach.Auto,
@@ -125,13 +133,13 @@ namespace K9Companion
                 "If it isn't revived in time, or the raid ends first, that counts as the dog being killed."));
             GodMode = Config.Bind("Combat", "God mode", false,
                 "The dog fights as usual (with combat mode on) but can't be hurt or killed: hits do nothing to it. Bots still shoot at it.");
-            ControlAfterDeath = Config.Bind("Combat", "Control the dog when you die", false,
+            ControlAfterDeath = Config.Bind("Combat", "Control the dog when you die", false, Adv(
                 "When you're killed in a raid with your dog alive, you carry on as the dog instead of the raid ending: WASD to move " +
                 "(Shift to sprint, Ctrl to sneak), the mouse to look, Space to jump, left click to attack the enemy you're looking at. " +
-                "Get the dog to an open extract and it comes home with its jacket and what's in it. Your own gear is lost as usual.");
-            LeaveDog = Key("Stop controlling the dog", KeyCode.Return, "While you're controlling the dog after dying: end the raid now.");
-            DogJump = Key("Dog jump", KeyCode.Space, "While you're controlling the dog after dying: jump (over a fence, a crate, a gap).");
-            DogDoor = Key("Dog: open door", KeyCode.F, "While you're controlling the dog after dying: nose open the door in front of it (not a locked one).");
+                "Get the dog to an open extract and it comes home with its jacket and what's in it. Your own gear is lost as usual."));
+            LeaveDog = AdvKey("Stop controlling the dog", KeyCode.Return, "While you're controlling the dog after dying: end the raid now.");
+            DogJump = AdvKey("Dog jump", KeyCode.Space, "While you're controlling the dog after dying: jump (over a fence, a crate, a gap).");
+            DogDoor = AdvKey("Dog: open door", KeyCode.F, "While you're controlling the dog after dying: nose open the door in front of it (not a locked one).");
             BleedOutTime = Config.Bind("Combat", "Downed: time to revive", 180f, Adv(
                 "Seconds you have to revive a downed dog. Treating it stops the clock. 0 = as long as the raid lasts.", new AcceptableValueRange<float>(0f, 600f)));
             SurvivalNeeds = Config.Bind("Survival", "EnableSurvivalNeeds", true,
@@ -154,21 +162,30 @@ namespace K9Companion
                 "down to half speed at most. 0 = no limit. What the dog carries never counts towards your own weight.", new AcceptableValueRange<float>(0f, 200f)));
             Scale = Config.Bind("Appearance", "Scale", 1f,
                 Adv("Dog size; applied when it spawns.", new AcceptableValueRange<float>(0.5f, 2f)));
-            SnowOnDog = Config.Bind("Appearance", "Snow on the dog", false,
+            SnowOnDog = Config.Bind("Appearance", "Snow on the dog", false, Adv(
                 "On snowy maps the game paints snow over the ground and everything else that isn't a person. Off: the dog " +
-                "stays clear of it, as you and the bots do. On: it gets the same snow as the ground.");
+                "stays clear of it, as you and the bots do. On: it gets the same snow as the ground."));
             Recall = Config.Bind("Controls", "Recall", new KeyboardShortcut(KeyCode.F8), "Call the dog back: it runs to you and follows again.");
-            Bring = Key("Bring dog to me", KeyCode.F8, "Put the dog straight in front of you (for when it's stuck), following you again. " +
+            Bring = AdvKey("Bring dog to me", KeyCode.F8, "Put the dog straight in front of you (for when it's stuck), following you again. " +
                 "Also in the DOG commands of the Y menu.", KeyCode.LeftShift);
             HealthBar = Config.Bind("Display", "Dog health bar", true,
                 "In raids with combat mode on, the dog's name and health floating over its head, seen through walls.");
-            HealthBarAt = Config.Bind("Display", "Dog health bar position", HealthBarPlace.OverTheDog,
+            HealthBarAt = Config.Bind("Display", "Dog health bar position", HealthBarPlace.OverTheDog, Adv(
                 "Over the dog: floating over its head, seen through walls. Under your health: in one place on your HUD, top left " +
-                "under your health figure (under the dog camera if that's there too).");
-            HealthBarFade = Config.Bind("Display", "Fade health bar near your crosshair", true,
+                "under your health figure (under the dog camera if that's there too)."));
+            HealthBarFade = Config.Bind("Display", "Fade health bar near your crosshair", true, Adv(
                 "Over the dog: the bar fades out as it nears the middle of the screen, and further out while you aim down sights, " +
-                "so it never covers what the dog's fighting.");
+                "so it never covers what the dog's fighting."));
+            ScrollingTabs = Config.Bind("Display", "Scrolling tab bar", true,
+                "The character screen's tab bar scrolls sideways (mouse wheel, or the arrows at its right end) when other mods' tabs " +
+                "don't all fit. Turn it off if another mod already does this for every screen: the DOG tab is still added, and " +
+                "the bar is left as the game and the other mods have it. Takes effect the next time the character screen opens.");
             Hideout = Config.Bind("Hideout", "Enabled", true, "Spawn in the hideout as well as raids.");
+            KennelFoundInRaid = Config.Bind("Hideout", "Found-in-raid kennel materials", false,
+                "On: building a kennel level takes found-in-raid materials only (roubles aside), like the game's own hideout upgrades " +
+                "on hardcore settings: they show the found-in-raid mark, only those count, and only those are handed over. Off: any of " +
+                "them will do. Takes effect the next time a kennel's screen opens. The server's owner can fix it for everyone " +
+                "(kennelFoundInRaid in the server mod's config.jsonc), and then this does nothing.");
             Roam = Config.Bind("Hideout", "Wander when bored", true, Adv("After resting a while the dog gets up, wanders round the hideout, comes to say hello, then goes back to its bed."));
             DogName = Config.Bind("Appearance", "Name", "K9", Adv("Name on the collar tag and command display."));            Sounds = Config.Bind("Audio", "Enabled", true, "Play companion sounds and recall whistle locally.");
             RareWhine = Config.Bind("Audio", "Rare whining", true, Adv("Occasional quiet whine while resting; suppressed when crouching."));
@@ -177,11 +194,11 @@ namespace K9Companion
                 "How loud the dog's panting is, next to its other sounds. It only pants after a hard run (keeping up with you sprinting, or a chase), and is quiet otherwise. 0 = silent.",
                 new AcceptableValueRange<float>(0, 1)));
             Stay = Key("Stay or follow", KeyCode.F7, "Toggle stay and follow.");
-            Lie = Key("Lie down", KeyCode.F7, "Lie down here.", KeyCode.LeftShift);
-            Rename = Key("Rename dog", KeyCode.F9, "Open the in-game dog naming dialog when nearby.");
-            Pet = Key("Pet", KeyCode.F10, "Pet the dog when within 2.5 metres (also in its interact menu).");
-            Feed = Key("Food", KeyCode.F9, "Refill the food dish in the hideout.", KeyCode.LeftShift);
-            Water = Key("Water", KeyCode.F10, "Refill the water dish in the hideout.", KeyCode.LeftShift);
+            Lie = AdvKey("Lie down", KeyCode.F7, "Lie down here.", KeyCode.LeftShift);
+            Rename = AdvKey("Rename dog", KeyCode.F9, "Open the in-game dog naming dialog when nearby.");
+            Pet = AdvKey("Pet", KeyCode.F10, "Pet the dog when within 2.5 metres (also in its interact menu).");
+            Feed = AdvKey("Food", KeyCode.F9, "Refill the food dish in the hideout.", KeyCode.LeftShift);
+            Water = AdvKey("Water", KeyCode.F10, "Refill the water dish in the hideout.", KeyCode.LeftShift);
             DogCamKey = Key("Dog camera", KeyCode.F6, "Show or hide the dog camera feed (raids, when the dog wears a camera).");
             DogCamShow = Config.Bind("Dog camera", "Show feed", true,
                 Adv("Top left of the screen in a raid: what the dog's camera sees, when it wears the camera vest or the clip-on action camera."));
@@ -214,7 +231,7 @@ namespace K9Companion
                     return;
                 }
             ready = true;
-            DogModel.WarmUp(AssetFolder);
+            DogModel.WarmUp(Breed.Shepherd);
             harmony = new Harmony(Id);
             harmony.Patch(AccessTools.Method(typeof(GameWorld), nameof(GameWorld.OnGameStarted)),
                 postfix: new HarmonyMethod(typeof(Plugin), nameof(RaidStarted)));
@@ -234,6 +251,8 @@ namespace K9Companion
             PatchFeature("K9 quest events (kills with the dog)", K9Events.Patch);
             PatchFeature("K9 Kennel in the Rest Space", KennelUi.Patch);
             PatchFeature("K9 Kennel icon hover", KennelIcon.Patch);
+            PatchFeature("kennel lamps following the hideout's light switch", KennelLights.Patch);
+            PatchFeature("the K9 kennels room (Hideout Extensions)", _ => KennelsRoom.Hook());
             DogNet.Load();
             Logger.LogInfo($"K9 Companion {Version} loaded from {AssetFolder}.");
         }
@@ -316,11 +335,37 @@ namespace K9Companion
             ? $"{r.Aggression}, auto-engage {r.AutoEngage}, cooldown {r.BiteCooldown:0.0} s, engage {r.EngageDistance:0} m, bites to kill {r.BitesToKill:0.#} (bosses {r.BossBitesToKill:0.#}), health {r.Health:0}, {(r.Immortal ? "god mode" : "mortal")}"
             : "passive, immortal, not targeted";
 
-        internal static Tuning Tuning => new Tuning
+        internal static Tuning Tuning => TuningFor(Pack.ActiveBreed);
+
+        // The settings, for a dog of that breed (its gaits' own speeds, and how much it quickens them).
+        internal static Tuning TuningFor(Breed breed)
         {
-            Walk = WalkSpeed.Value, Run = RunSpeed.Value, Sprint = SprintSpeed.Value, Follow = Distance.Value,
-            RunFrom = Mathf.Max(RunDistance.Value, Distance.Value + 1), SprintFrom = Mathf.Max(SprintDistance.Value, RunDistance.Value + 4)
-        };
+            breed = breed ?? Breed.Shepherd;
+            return new Tuning
+            {
+                Walk = WalkSpeed.Value, Run = RunSpeed.Value, Sprint = SprintSpeed.Value, Follow = Distance.Value,
+                RunFrom = Mathf.Max(RunDistance.Value, Distance.Value + 1), SprintFrom = Mathf.Max(SprintDistance.Value, RunDistance.Value + 4),
+                Authored = breed.Authored, Cadence = breed.Cadence, Stride = breed.Stride, Burst = breed.Burst,
+                Stretch = breed.Stretch, MaxPlayback = breed.MaxPlayback
+            };
+        }
+
+        // Work from another thread (a server reply) that changes game objects: run at the next frame.
+        private static readonly System.Collections.Concurrent.ConcurrentQueue<Action> mainThread = new System.Collections.Concurrent.ConcurrentQueue<Action>();
+        internal static void OnMainThread(Action action) => mainThread.Enqueue(action);
+
+        /// <summary>
+        /// The active dog is another one now (or its coat changed): the hideout's dog, the one made ready for a raid and the
+        /// raid screen's are made again as that dog, and the dogs at their kennels are looked at again.
+        /// </summary>
+        internal static void DogChanged()
+        {
+            try { DogPreload.Release(); } catch (Exception e) { Log.LogWarning("Dropping the prepared dog: " + e.Message); }
+            try { DogLobby.Release(); } catch (Exception e) { Log.LogWarning("Dropping the preview dog: " + e.Message); }
+            if (hideoutDog != null) { UnityEngine.Object.Destroy(hideoutDog.gameObject); hideoutDog = null; }
+            if (instance != null) instance.nextHideout = 0;
+            KennelResidents.Refresh();
+        }
 
         private static void RaidStarted(GameWorld __instance)
         {
@@ -352,11 +397,18 @@ namespace K9Companion
         // The hideout's dog, once attached (so the scene isn't searched again).
 
         private static Companion hideoutDog;
+        internal static Companion HideoutDog => hideoutDog;
 
         private void Update()
         {
             if (!ready) return;
+            while (mainThread.TryDequeue(out Action action))
+            {
+                try { action(); }
+                catch (Exception e) { Log.LogError("K9: " + e); }
+            }
             K9.Tick();
+            KennelResidents.Tick();
             if (Companion.Raid == null) K9.Recover();
             if (!Active.Value || !Hideout.Value || Time.unscaledTime < nextHideout) return;
             nextHideout = Time.unscaledTime + 2;

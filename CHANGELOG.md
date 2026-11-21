@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.5.0
+
+Needs SPT 4.1.x and now **Hideout Extensions 1.3.0 or later** (client and server). Install over 1.4.0 (client and server). With Fika, everyone updates, as the version is the same throughout.
+
+### Added
+
+- **More dogs.** Five new breeds besides the German shepherd: Rottweiler, Siberian Husky, Beagle, Shiba Inu and Pug, each in three coats. Once you've finished Trust Is Earned, Dr. Yang sells adoption papers for each breed in each of its coats (15 in all, papers in your stash). You can have one dog of each breed: once you have one, or are holding its papers, that breed's papers are off his shelf. Throw the papers away and they're back. Every dog is its own: its name, needs, health, gear, training and its own kennel levels. They all fight, sniff out loot and wear the gear, with stats that go with their size (a Rottweiler takes more killing and bites harder; a Beagle smells loot further off). An unnamed dog goes by its breed's name until you name it.
+- **The new breeds look and move like real dogs.** Grown, each stands a little over a real dog of its breed. Their coats have full-resolution surface detail, shading in the folds, and the fur strands their models come with along the belly, legs, rump and tail. Each breed steps at its own natural rate (small dogs a little quicker than big ones), jumps as gravity says, and runs up to a low wall and jumps it rather than going the long way round.
+- **The DOGS panel** on the DOG tab lists your dogs and changes which one is active. The last dog's jacket and collar go into its own holder, and the new one puts on its own. Only the active dog comes on raids. **GIVE BACK** returns an adopted dog to Dr. Yang (its gear goes to your stash) so you can take a different coat of that breed. The K9 unit's shepherd stays.
+- **Dogs grow up.** A dog from adoption papers comes home young: about 60% of its grown size, health and bite, and slower. It grows with every day you have it and every raid it comes back from (grown after 30 days, or 20 raids survived, sooner with both). Dogs you had before, and the K9 unit's shepherd, are grown. The DOGS panel shows how far along each one is.
+- **Your other dogs live in the hideout**, each at its own kennel (at that dog's own kennel level). They lie on their beds, doze when nobody's about, and get up to watch you when you come close. The K9 Kennel screen builds the active dog's kennel, and each dog's kennel is built separately.
+- **All the kennels together.** Your dogs' kennels stand in a group round the active dog's kennel (the paw on the overview), in the same room as it. Drag the paw and the whole group follows.
+- **The K9 kennels room.** A 12.5 x 12.5 m room through the north wall of Hideout Extensions' east hall, built like its other rooms (150,000 roubles, 3 nails, 3 bolts, 1 hour). Once it's built all your dogs live there, the active one too, each at its own spot along the walls. A kennel you've moved by hand stays where you put it. This is why K9 Companion now needs Hideout Extensions.
+- **Found-in-raid kennel materials** (F12, Hideout). On: a kennel level takes found-in-raid materials only (roubles aside), as the game's hardcore hideout does. Off by default. The server's owner can fix it for everyone with `kennelFoundInRaid` in the server mod's `config.jsonc`, and then the server refuses anything else.
+
+### Changed
+
+- **Every dog has its bed and bowls from the start.** The kennel's levels add the rest; before, the bed only came with the first level.
+- **Kennel lamps follow the hideout's light switch** like its own lamps: off with the lights off or on candles, a tube's light with fluorescent tubes, a bulb's with bulbs and the holiday lights.
+- **A shorter F12 list.** Most settings are now under F12's "Advanced settings". Shown without it: the dog on or off, solo raids only, combat mode, aggression, god mode, hunger and thirst, the hideout dog, found-in-raid kennel materials, the health bar, the scrolling tab bar, sound and its volume, and the recall, stay and dog camera keys. Nothing is reset: every setting keeps its value.
+- **The scrolling tab bar can be turned off**: Display > Scrolling tab bar. Use this if another mod already scrolls the tabs on every screen. The DOG tab is still added, and the bar is left as the game and your other mods have it (from the next time the character screen opens).
+- **A smaller download** with nothing lost: dog models store each vertex once instead of up to six times (a fifth of the work to animate each dog), pictures are packed tighter, normal maps leave out the channel the shader works out for itself, and the metal/smoothness maps the game's shader never used are no longer shipped. Kennels share one compressed copy of their pictures, and each breed's are cached once, so a hideout full of dogs doesn't stall.
+
+### Fixed
+
+- **The dog's health bar showed on the pause menu** (Esc) in a raid. It now shows only over the raid itself.
+- **The character screen's tab bar narrowed as you scrolled your inventory.** The scrolling strip ends at the first button on the tabs' row, and it counted the inventory's rows as they scrolled up out of sight behind the bar. It now counts only what you can see.
+- **A kennel could go down in a doorway**, where a doorway Hideout Extensions cut through a wall has no collider to stop it. Kennels now keep clear of its doorways.
+- **The dog could sit on a ledge over your head** at the foot of a stair. Off the bots' navmesh, with its own route there used up, it went by the straight-line distance, 2 m, and took that for beside you. Now a floor above or below you, with no way to you that it can measure, never counts as beside you: it keeps coming, and if it can't, it comes to you as a lost dog does.
+
 ## 1.4.0
 
 Needs SPT 4.1.x. Install over 1.3.2 (client and server). With Fika, everyone updates, as the version is the same throughout.

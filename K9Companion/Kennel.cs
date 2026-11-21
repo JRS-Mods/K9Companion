@@ -49,11 +49,18 @@ namespace K9Companion
         {
             Player owner = CurrentPlayer;
             bool room = KennelRoom.Prepare(out Vector3 corner, out _);   // the kennel's room is cleared wherever the kennel stands
+            bool kennels = KennelsRoom.Room != null;
             Vector3 at = default; Quaternion facing = Quaternion.identity;
             bool placed = false;
-            // Once its room is open the kennel belongs there, whatever spot was saved before, unless it was put somewhere
-            // by hand (moved from the overview with Hideout Extensions).
-            if (needs != null && needs.HomeSet && !needs.HomeByHand && room && Flat(new Vector3(needs.HomeX, needs.HomeY, needs.HomeZ), corner) > 3f)
+            // Once the K9 kennels room is built the kennel belongs there with the other dogs' (else in the room behind the
+            // emergency wall once that's open), whatever spot was saved before, unless it was put somewhere by hand (moved
+            // from the overview with Hideout Extensions).
+            if (needs != null && needs.HomeSet && !needs.HomeByHand && kennels && !KennelsRoom.Inside(new Vector3(needs.HomeX, needs.HomeY, needs.HomeZ)))
+            {
+                Plugin.Log.LogInfo("The saved kennel spot is outside the K9 kennels room; moving it there.");
+                needs.HomeSet = false;
+            }
+            if (needs != null && needs.HomeSet && !needs.HomeByHand && !kennels && room && Flat(new Vector3(needs.HomeX, needs.HomeY, needs.HomeZ), corner) > 3f)
             {
                 Plugin.Log.LogInfo("The saved kennel spot is outside the kennel's room; moving it there.");
                 needs.HomeSet = false;
@@ -71,6 +78,8 @@ namespace K9Companion
                 placed = KennelFits(at, facing, out string why);
                 if (!placed) Plugin.Log.LogInfo($"The saved kennel spot isn't clear any more ({why}); finding a new one.");
             }
+            if (!placed && kennels && KennelsRoom.Find(kennelLevel, "K9 kennel", out at, out facing))
+            { placed = true; MoveKennel(at, facing); Plugin.Log.LogInfo($"Kennel (level {kennelLevel}) placed in the K9 kennels room at {at}."); }
             if (!placed) placed = AreaSpot(out at, out facing);
             // Next to you only while you walk round the hideout: on the overview your character is switched off and parked
             // outside it, and the kennel went there, into the void.
@@ -85,7 +94,9 @@ namespace K9Companion
             decor.SetKennelLevel(kennelLevel, Solid);
             decor.PlaceHome(at, facing);
             command = Command.Down;
-            Teleport(at, at + facing * Vector3.forward);
+            // On its bed, wherever that's been moved to (Hideout Interiors).
+            Transform bedSpot = decor.BedSpot;
+            Teleport(bedSpot.position, bedSpot.position + bedSpot.forward);
         }
 
         // ---- finding a spot -----------------------------------------------------------------------------------------
@@ -177,6 +188,7 @@ namespace K9Companion
         // to reach the bowls.
         private bool KennelFits(Vector3 at, Quaternion facing, out string why)
         {
+            if (KennelsRoom.NearDoorway(at)) { why = "in a doorway"; return false; }
             // The bed and bowls, then whatever the kennel's level adds beside them (cabinet, barrel, vet table).
             bool first = true;
             foreach (var (localCentre, half) in CompanionDecor.Footprint(kennelLevel))
@@ -236,6 +248,7 @@ namespace K9Companion
         /// </summary>
         internal static bool InsideHideout(Vector3 p)
         {
+            if (KennelsRoom.InAnyRoom(p)) return true;
             Bounds box = default; int n = 0;
             try
             {
@@ -252,10 +265,11 @@ namespace K9Companion
                    && p.y > box.min.y - 5 && p.y < box.max.y + 4;
         }
 
-        // People, the dog and the kennel itself never count as obstacles.
+        // People, the dog and the kennel itself never count as obstacles, nor the other dogs and their kennels: they follow
+        // this one and are laid out again round it (KennelResidents.Regroup).
         private static bool Ignored(Collider c)
-            => c.GetComponentInParent<Player>() != null || c.GetComponentInParent<DogHitbox>() != null || c.transform.root.name == "K9 kennel"
-               || c.GetComponentInParent<Companion>() != null || c.transform.root.name == "K9 Companion dog";
+            => c.GetComponentInParent<Player>() != null || c.GetComponentInParent<DogHitbox>() != null || c.transform.root.name.StartsWith("K9 kennel", StringComparison.Ordinal)
+               || c.GetComponentInParent<Companion>() != null || c.transform.root.name == "K9 Companion dog" || c.transform.root.name.StartsWith("K9 resident ", StringComparison.Ordinal);
 
         // ---- moving it, and the dog's trips to bed ------------------------------------------------------------------
 
@@ -267,6 +281,17 @@ namespace K9Companion
             Plugin.Log.LogInfo($"The kennel's level {kennelLevel} doesn't fit where it stands ({why}); moving it.");
             if (AreaSpot(out Vector3 at, out Quaternion facing)) { SetCommand(Command.Down); Teleport(at, at + facing * Vector3.forward); }
             else decor.SetKennelLevel(kennelLevel, Solid);
+        }
+
+        // The K9 kennels room is in (built while you're here, or loaded after the kennel was put down): the kennel moves
+        // in with the others, unless you moved it by hand, and the dog walks over to its bed.
+        internal void KennelsRoomReady()
+        {
+            if (!IsHideout || decor?.Home == null || (needs?.HomeByHand ?? false) || KennelsRoom.Inside(decor.Home.position)) return;
+            if (!KennelsRoom.Find(kennelLevel, "K9 kennel", out Vector3 at, out Quaternion facing)) return;
+            Plugin.Log.LogInfo($"Kennel (level {kennelLevel}) moved into the K9 kennels room at {at}.");
+            MoveKennel(at, facing);
+            if (dog != null && !dead && !roaming) GoToBed(true);
         }
 
         // Moving it from the overview (Hideout Extensions): why it can't stand there, or null.
@@ -284,6 +309,7 @@ namespace K9Companion
         private void MoveKennel(Vector3 at, Quaternion facing)
         {
             decor.PlaceHome(at, facing);
+            KennelResidents.Regroup();   // the other dogs' kennels follow it, laid out round it again
             decor.SetKennelLevel(kennelLevel, Solid);   // the upgrades look for room again at the new spot
             if (needs != null)
             {
@@ -297,11 +323,12 @@ namespace K9Companion
         {
             if (!IsHideout || decor?.Home == null) { if (!quiet) Say("The bed is in the hideout."); return; }
             SetCommand(Command.Down);
-            Vector3 bed = decor.Home.position;
+            // Its bed, wherever that's been moved to (Hideout Interiors).
+            Vector3 bed = decor.BedSpot.position;
             if (Flat(dog.transform.position, bed) <= .3f) { if (!quiet) Say("Bed."); return; }
             // The dog walks there when it can find a way, round to the shelter's door and in (never through its walls);
             // otherwise it goes straight to its bed.
-            if (!Reachable(bed)) Teleport(bed, bed + decor.Home.forward);
+            if (!Reachable(bed)) Teleport(bed, bed + decor.BedSpot.forward);
             else { bedRoute.Clear(); bedRoute.AddRange(decor.BedRoute(dog.transform.position)); bedTrip = true; }
             if (!quiet) Say("Bed.");
         }
@@ -313,18 +340,18 @@ namespace K9Companion
         {
             spot = default;
             if (!bedTrip || decor?.Home == null) { bedTrip = false; return false; }
-            Vector3 bed = decor.Home.position;
+            Vector3 bed = decor.BedSpot.position;
             while (bedRoute.Count > 1 && Flat(dog.transform.position, bedRoute[0]) <= .35f) bedRoute.RemoveAt(0);
             spot = bedRoute.Count > 0 ? bedRoute[0] : bed;
             if (bedRoute.Count > 1 || Flat(dog.transform.position, spot) > .3f)
             {
                 // Stuck on the way (a door closed, someone in the way): finish the trip directly.
-                if (Time.time - lastProgress > 6) { bedTrip = false; Teleport(bed, bed + decor.Home.forward); return false; }
+                if (Time.time - lastProgress > 6) { bedTrip = false; Teleport(bed, bed + decor.BedSpot.forward); return false; }
                 return true;
             }
             // Arrived: it turns to face out of its door; Down makes it lie on the bed, and in time it sleeps.
             bedTrip = false;
-            yaw = decor.Home.eulerAngles.y;
+            yaw = decor.BedSpot.eulerAngles.y;
             return false;
         }
     }
@@ -423,7 +450,7 @@ namespace K9Companion
             MethodInfo can = AccessTools.Method(typeof(ImprovementView), nameof(ImprovementView.CanImprove))
                              ?? throw new MissingMethodException(nameof(ImprovementView), nameof(ImprovementView.CanImprove));
             if (ImprovementField == null) throw new MissingFieldException(nameof(ImprovementView), "_improvement");
-            harmony.Patch(show, postfix: new HarmonyMethod(typeof(KennelUi), nameof(Shown)));
+            harmony.Patch(show, prefix: new HarmonyMethod(typeof(KennelUi), nameof(FoundInRaid)), postfix: new HarmonyMethod(typeof(KennelUi), nameof(Shown)));
             harmony.Patch(can, postfix: new HarmonyMethod(typeof(KennelUi), nameof(Allowed)));
             harmony.Patch(AccessTools.Method(typeof(ImprovementView), nameof(ImprovementView.UpdateImprovementInfo)), postfix: new HarmonyMethod(typeof(KennelUi), nameof(Status)));
             harmony.Patch(AccessTools.Method(typeof(AreaScreenSubstrate), nameof(AreaScreenSubstrate.SelectArea)), prefix: new HarmonyMethod(typeof(KennelUi), nameof(Selecting)));
@@ -431,6 +458,32 @@ namespace K9Companion
         }
 
         private static int Level(Improvement improvement) => improvement == null ? 0 : Array.IndexOf(K9.KennelIds, improvement.Id) + 1;
+
+        // Roubles, dollars, euros: money is never found in raid.
+        private static readonly string[] Money = { "5449016a4bdc2d6f028b456f", "5696686a4bdc2da3298b456a", "569668774bdc2da2298b4568" };
+
+        /// <summary>
+        /// Before a kennel level's materials are shown: found in raid only, or not (F12 Hideout > Found-in-raid kennel
+        /// materials, unless the server fixes it), counted again from your stash when that changes. The game then shows
+        /// the found-in-raid mark on each, counts only those, and hands only those over when you build.
+        /// </summary>
+        private static void FoundInRaid(Improvement improvement)
+        {
+            try
+            {
+                if (Level(improvement) == 0 || improvement.Requirements == null) return;
+                if (!ServerRules.Loaded) ServerRules.Refresh();
+                bool fir = ServerRules.KennelFoundInRaid ?? Plugin.KennelFoundInRaid.Value;
+                foreach (ItemRequirement need in improvement.Requirements.OfType<ItemRequirement>())
+                {
+                    bool want = fir && !Money.Contains(need.TemplateId);
+                    if (need.IsSpawnedInSession == want) continue;
+                    need.IsSpawnedInSession = want;
+                    if (Comfort.Common.Singleton<HideoutRepresentation>.Instantiated) need.Test(Comfort.Common.Singleton<HideoutRepresentation>.Instance.AllStashItems);
+                }
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("The kennel's found-in-raid setting couldn't be applied: " + e.Message); }
+        }
 
         /// <summary>Why a kennel level can't be started yet, or null.</summary>
         internal static string Locked(int level, Profile profile)
@@ -654,7 +707,7 @@ namespace K9Companion
             else if (outline.Target == kennelHome) { outline.Target = null; outline.enabled = false; }
         }
 
-        public static void Tick(Transform kennel, int level, Companion companion)
+        public static void Tick(Transform kennel, bool atBed, int level, Companion companion)
         {
             if (failed) return;
             if (kennel == null) { Close(); return; }
@@ -666,14 +719,14 @@ namespace K9Companion
                 if (panel == null && !Create()) return;
                 Bar(level);
                 // Right-clicking the paw moves the kennel, with Hideout Extensions.
-                if (level >= 1) HideoutExtensionsLink.Kennel(panel.gameObject, kennel, companion);
-                else HideoutExtensionsLink.Unmovable(panel.gameObject, "Build the K9 Kennel first: then it can be moved.");
+                if (atBed) HideoutExtensionsLink.Kennel(panel.gameObject, kennel, companion);
+                else HideoutExtensionsLink.Unmovable(panel.gameObject, "The kennel has no clear floor yet: it can be moved once it's in the hideout.");
                 if (screen.FirstPerson != firstPerson) { firstPerson = screen.FirstPerson; panel.SetPointOfView(firstPerson); }
                 Dress(level);
                 Camera camera = CameraManager.Instance?.Camera;
                 if (camera == null) return;
                 // Placed the way the game places its own: just over the dog's bed, in screen space, with distance as depth.
-                Vector3 point = level >= 1 ? kennel.TransformPoint(new Vector3(0, .8f, -.05f)) : kennel.position + Vector3.up * .9f;
+                Vector3 point = atBed ? kennel.TransformPoint(new Vector3(0, .8f, -.05f)) : kennel.position + Vector3.up * .9f;
                 Vector3 view = camera.WorldToViewportPoint(point);
                 float distance = (camera.transform.position - point).magnitude * (view.z < 0 ? -1 : 1);
                 panel.SetPosition(new Vector3(view.x * Screen.width, view.y * Screen.height, distance));
@@ -961,12 +1014,20 @@ namespace K9Companion
         private readonly Dictionary<string, (Mesh mesh, Material material)> parts = new Dictionary<string, (Mesh, Material)>();
         private readonly List<UnityEngine.Object> resources = new List<UnityEngine.Object>();
 
+        // One copy of each file's models for every kennel that uses them (the active dog's and each other dog's): every
+        // kennel loaded its own, and with six dogs that was six sets of 2048-pixel pictures on the graphics card (about
+        // 1 GB) and seconds of decoding as the hideout opened. Each Load is matched by one Dispose; the last frees them.
+        private static readonly Dictionary<string, PropModel> shared = new Dictionary<string, PropModel>(StringComparer.OrdinalIgnoreCase);
+        private string key;
+        private int users;
+
         public static PropModel Load(string folder, string file = "kennel.props")
         {
             string path = Path.Combine(folder, file);
+            if (shared.TryGetValue(path, out PropModel known) && known.users > 0) { known.users++; return known; }
             if (!File.Exists(path)) { Plugin.Log.LogWarning(file + " not found; the kennel does without it."); return null; }
-            var model = new PropModel();
-            try { model.Read(folder, path); return model; }
+            var model = new PropModel { key = path, users = 1 };
+            try { model.Read(folder, path); shared[path] = model; return model; }
             catch (Exception e) { Plugin.Log.LogError(file + " couldn't be read; the kennel does without it: " + e.Message); model.Dispose(); return null; }
         }
 
@@ -1006,37 +1067,28 @@ namespace K9Companion
             resources.Add(material);
             if (File.Exists(texturePath))
             {
-                var texture = new Texture2D(2, 2, TextureFormat.RGBA32, true);
-                resources.Add(texture);
-                if (ImageConversion.LoadImage(texture, File.ReadAllBytes(texturePath), false)) { texture.anisoLevel = 4; material.mainTexture = texture; }
+                // Compressed on the graphics card and kept so (TextureCache), as the dog's coat is: uncompressed, each of
+                // these 2048-pixel pictures took 22 MB.
+                try
+                {
+                    Texture2D texture = TextureCache.Load(texturePath);
+                    resources.Add(texture); texture.anisoLevel = 4; material.mainTexture = texture;
+                }
+                catch (Exception e) { Plugin.Log.LogWarning(Path.GetFileName(texturePath) + " couldn't be read: " + e.Message); }
             }
             if (material.HasProperty("_Glossiness")) material.SetFloat("_Glossiness", glossy ? .55f : .12f);
             if (material.HasProperty("_Metallic")) material.SetFloat("_Metallic", glossy ? .15f : 0f);
-            // The model's own normal map (the relief its full-detail mesh had) and metal/smoothness map, where the
-            // converter wrote them (kennel_<name>_n.png, _ms.png); without them the colour alone, as before.
+            // The model's own normal map (the relief its full-detail mesh had), where the converter wrote it
+            // (kennel_<name>_n.png); without it the colour alone, as before. (No metal/smoothness map: the game's Standard
+            // shader has no variant that reads one, so the gloss above is what shows.)
             string stem = Path.Combine(Path.GetDirectoryName(texturePath) ?? "", Path.GetFileNameWithoutExtension(texturePath));
-            Texture2D normal = DataTexture(stem + "_n.png"), metalSmooth = DataTexture(stem + "_ms.png");
+            Texture2D normal = TextureCache.LoadData(stem + "_n.png", TextureCache.Data.Normal);
             if (normal != null && material.HasProperty("_BumpMap"))
             {
+                resources.Add(normal); normal.anisoLevel = 4;
                 material.SetTexture("_BumpMap", normal); material.SetFloat("_BumpScale", 1f); material.EnableKeyword("_NORMALMAP");
             }
-            if (metalSmooth != null && material.HasProperty("_MetallicGlossMap"))
-            {
-                material.SetTexture("_MetallicGlossMap", metalSmooth); material.EnableKeyword("_METALLICGLOSSMAP");
-                if (material.HasProperty("_GlossMapScale")) material.SetFloat("_GlossMapScale", 1f);
-            }
             return material;
-        }
-
-        // A map holding data rather than colour (normals, metal/smoothness): read as it is, without the colour correction.
-        private Texture2D DataTexture(string path)
-        {
-            if (!File.Exists(path)) return null;
-            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, true, true) { name = Path.GetFileName(path) };
-            resources.Add(texture);
-            if (!ImageConversion.LoadImage(texture, File.ReadAllBytes(path), false)) return null;
-            texture.anisoLevel = 4;
-            return texture;
         }
 
         public Transform Spawn(string name, Transform parent, Vector3 localPosition, float scale)
@@ -1079,6 +1131,8 @@ namespace K9Companion
 
         public void Dispose()
         {
+            if (--users > 0) return;
+            if (key != null && shared.TryGetValue(key, out PropModel known) && known == this) shared.Remove(key);
             foreach (var resource in resources) if (resource != null) UnityEngine.Object.Destroy(resource);
             resources.Clear(); parts.Clear();
         }

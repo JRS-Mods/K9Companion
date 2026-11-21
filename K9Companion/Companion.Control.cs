@@ -162,7 +162,7 @@ namespace K9Companion
             }
             crouching = sneak;
             Vector3 start = dog.transform.position;
-            Tuning tuning = Plugin.Tuning;
+            Tuning tuning = DogTuning;
             float fitness = NeedsFactor * jacketSpeed;
             tuning.Walk *= fitness; tuning.Run *= fitness; tuning.Sprint *= fitness;
             float desired;
@@ -449,7 +449,7 @@ namespace K9Companion
             Camera view = CameraManager.Instance?.Camera;
             if (view == null || dog == null) return;
             ClearDeathView(view);
-            float s = Mathf.Max(.3f, Plugin.Scale.Value);
+            float s = Mathf.Max(.3f, DogSize);
             Vector3 pivot = dog.transform.position + Vector3.up * (.8f * s);
             Quaternion look = Quaternion.Euler(camPitch, camYaw, 0);
             Vector3 back = look * Vector3.back;

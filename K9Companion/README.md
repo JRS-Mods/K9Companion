@@ -2,6 +2,8 @@
 
 By JRS.
 
+Needs SPT 4.1.x and **Hideout Extensions** 1.3.0 or later (client and server): your dogs live in a room of their own that it adds to the hideout (see Where the kennel goes).
+
 The companion keeps stance-aware following, the collar, pet response, recall whistle, rare whining and the hideout bed/food/water features. Attacking exists only in CombatMode. The dog does not gather loot. The package contains 48 animations, including death, hit and bite.
 
 ## Translations
@@ -81,7 +83,7 @@ The jackets have slots but no weight limit, and what the dog carries never count
 
 ## Settings for everyone on a server
 
-The owner of the SPT server can fix dog settings for all its players in `SPT_Runtime/user/mods/K9Companion.Server/config.jsonc` (made the first time the server starts): combat mode, aggression, approach, Auto's rush distance, defend range, engagement distance, ordered range, bites to kill (and for bosses), bite cooldown and stagger, dog health, solo raids only, the downed state and its time limit, the carry limit, god mode and carrying on as the dog after you die. Each one left `null` stays each player's own setting. With Fika that means everyone in the raid plays by the same rules, as they all use the same SPT server. Saved changes count from each player's next raid, with no restart. In the DOG tab a fixed setting is marked (SERVER), and F12 changes to it do nothing. A mistake in the file fixes nothing, and the server log says what's wrong.
+The owner of the SPT server can fix dog settings for all its players in `SPT_Runtime/user/mods/K9Companion.Server/config.jsonc` (made the first time the server starts): combat mode, aggression, approach, Auto's rush distance, defend range, engagement distance, ordered range, bites to kill (and for bosses), bite cooldown and stagger, dog health, solo raids only, the downed state and its time limit, the carry limit, god mode and carrying on as the dog after you die. Each one left `null` stays each player's own setting. With Fika that means everyone in the raid plays by the same rules, as they all use the same SPT server. Saved changes count from each player's next raid, with no restart. In the DOG tab a fixed setting is marked (SERVER), and F12 changes to it do nothing. `kennelFoundInRaid` fixes Hideout > Found-in-raid kennel materials: `true` means kennel levels take found-in-raid materials only (roubles aside), and the server refuses anything else. A mistake in the file fixes nothing, and the server log says what's wrong.
 
 ## Combat settings (Combat section of the config)
 
@@ -152,15 +154,33 @@ The dog has no eating or drinking animations of its own; meals use the nose-to-g
 
 ## DOG tab (character screen)
 
-The character screen has a **DOG** tab after the game's own tabs (main menu, hideout and raid). When other mods' tabs (wrist accessories, weekend drops and so on) don't all fit, the tab bar scrolls: mouse wheel over the tabs, or the arrows at its right end. It keeps your stash on the right and shows the dog in place of your equipment:
+The character screen has a **DOG** tab after the game's own tabs (main menu, hideout and raid). When other mods' tabs (wrist accessories, weekend drops and so on) don't all fit, the tab bar scrolls: mouse wheel over the tabs, or the arrows at its right end. If another mod already does this for every screen, turn it off with Display > Scrolling tab bar. It keeps your stash on the right and shows the dog in place of your equipment:
 
 - Health (in a raid: its current health or DEAD; otherwise its full health, or "can't be hurt" when CombatMode is off), hunger and thirst.
 - Combat mode on/off and the aggression level, changeable right there.
 - **Vest (saddlebag):** which bag the dog wears, how much is in it, **Open vest** (the game's own item window, so you drag items in and out of it from your stash) and **Take vest off**. With several saddlebags you can choose which one to put on the dog. The worn bag is the one that goes into PMC raids, and the dog visibly wears a saddlebag harness while it has it. In a raid, Open vest works when you stand next to the dog.
 
+## More dogs: adoption papers, growing up
+
+Once you've finished Trust Is Earned, Dr. Yang sells **adoption papers** for five more breeds (Rottweiler, Siberian Husky, Beagle, Shiba Inu, Pug), each breed in each of its three coats:
+
+| Breed | Coats |
+| --- | --- |
+| Rottweiler | black and tan, black and mahogany, grey and tan |
+| Siberian Husky | black and white, copper, silver |
+| Beagle | tricolour, pied, red and white |
+| Shiba Inu | light red, red, cream |
+| Pug | fawn, apricot, black |
+
+You can have one dog of each breed. Once you have one, or are holding its papers, that breed's papers are off his shelf. Throw the papers away and they're back. Use papers in the DOG tab (**DOGS**, **ADOPT**). **GIVE BACK** on a dog in the DOGS panel returns it to Dr. Yang, with its gear going to your stash, so you can take another coat. The K9 unit's shepherd can't be given back, and neither can the active dog.
+
+**Growing up.** A dog from adoption papers comes home young: about 60% of its grown size, with 60% of its grown health and bite, and slower, since its gaits go with its size. It grows with every day you have it (grown in 30 days) and every raid it comes back from (grown in 20), the two together. Grown, it's about a fifth over the tall end of its real breed: a Rottweiler's head is about 1.1 m up. Dogs you had before, and the K9 unit's shepherd, are grown. The DOGS panel shows each dog as young, growing, nearly grown or grown. The server works out how far along a dog is (`K9Companion.k9.json` keeps when it was adopted and how many raids it has come back from), and the client sizes the dog and its kennel bed by it.
+
+**Fur.** The breeds have their models' fur strands along the belly, legs, rump and tail, cut out of their cards by the coats' shared alpha (`coat_alpha.png`). The head, neck and chest strand layers are left out, because hard-edged they showed as stripes.
+
 ## Hideout kennel
 
-The dog's corner in the hideout is the hideout's own pet bed (stretched so the dog fits inside lying down, about 1.2 x 1.0 m) with two of its pet bowls, copied from the rest space and kitchen at runtime so they look like the rest of the hideout (see Kennel furniture below). If the game ever drops those props, the bed and bowl from `E:\SPT Mod\Assets` are used instead (converted by `tools/convert_props.py` into `kennel.props`, `kennel_bed.jpg` and `kennel_bowl.jpg`). Once the kennel's first level is built (see K9 Kennel below; existing owners have it already), the kennel is set up the first time in the hideout's rest area: the mod finds a clear, level patch of floor near it, facing into the room, and remembers it. If there's no room there it goes where the dog is.
+The dog's corner in the hideout is the hideout's own pet bed (stretched so the dog fits inside lying down, about 1.2 x 1.0 m) with two of its pet bowls, copied from the rest space and kitchen at runtime so they look like the rest of the hideout (see Kennel furniture below). If the game ever drops those props, the bed and bowl from `E:\SPT Mod\Assets` are used instead (converted by `tools/convert_props.py` into `kennel.props`, `kennel_bed.jpg` and `kennel_bowl.jpg`). Every dog has its bed and bowls from the start; the kennel's levels (see K9 Kennel below) add the rest. The kennel is set up the first time in the hideout: the mod finds a clear, level patch of floor, facing into the room, and remembers it. If there's no room there it goes where the dog is.
 
 - **Resting:** the dog lies on the bed (on an invisible cushion surface so it doesn't sink in), and after a while falls asleep. Go to bed (Shift+F7 in the hideout) sends it back; it walks there, or goes straight there if the hideout has no navmesh.
 - **Eating and drinking:** it goes to the bowls on its own when hungry or thirsty, and walks back to bed afterwards (unless it's following you). Bowls show how full they are.
@@ -168,6 +188,10 @@ The dog's corner in the hideout is the hideout's own pet bed (stretched so the d
 - **Safety:** the kennel is made of new objects added to the hideout scene at runtime. The hideout's props are only copied, never changed, and the copies are destroyed when you leave the hideout. If neither the hideout props nor `kennel.props` are there, the kennel falls back to simple shapes.
 
 ### Where the kennel goes
+
+**All the kennels together.** Your other dogs' kennels stand in a group round the active dog's kennel (the paw on the overview): along its row either side, then in a row facing it across an aisle. Drag the paw (right-click it on the overview) and the whole group follows, laid out again round where you put it. They never stand in the way of where you drop it.
+
+**The K9 kennels room.** The server mod adds a room to Hideout Extensions: **K9 kennels**, 12.5 x 12.5 m, through a door in the north wall of Hideout Extensions' east hall (build the east hall first). It's built like any of its rooms, from the door's prompt or its plus icon on the overview: 150,000 roubles, 3 packs of nails and 3 bolts, 1 hour. Once it's built every dog lives there, the active dog too, each at its own kennel along the walls, backs to the wall and facing into the room, and each keeps its spot from visit to visit. The room has its own ceiling lamps, so its kennels have none of their own. A kennel you moved by hand (Moving the kennel, below) stays where you put it. Until the room is built, the kennels go where they always have:
 
 Once the emergency wall is broken through, the kennel has its own corner in the room behind it: the room's floor clutter (stepladder, bunk bed, tyre, box and the torch on the bed) is switched off while you're in the hideout, and the kennel stands where the bunk bed was, back to the wall and facing into the room. The clutter comes back when the dog leaves the hideout; nothing else of the room is touched. Without that room the kennel looks for space in the gym, then the rest space, then the hall of fame, and only takes a spot where the whole kennel for its level fits (bed and bowls, plus the cabinet and barrel at level 2 and the vet table at level 3). Each piece stands on the floor under it. It can't be moved by hand (that could leave it somewhere that breaks the hideout); once the room is open the kennel always goes back to it.
 
@@ -349,4 +373,12 @@ Dish levels are real and saved (see Hunger and thirst). Petting plays a dog resp
 
 ## Moving the kennel
 
-With Hideout Extensions installed, right-click the kennel's paw icon on the hideout's overview and the kennel follows your mouse (R turns it; Shift+R a little); left-click puts it down where it fits, right-click cancels. A kennel put somewhere by hand stays there, even outside its room behind the emergency wall.
+Right-click the kennel's paw icon on the hideout's overview and the kennel follows your mouse (R turns it; Shift+R a little); left-click puts it down where it fits, right-click cancels. A kennel put somewhere by hand stays there, even outside the K9 kennels room or the room behind the emergency wall. No kennel goes down in one of Hideout Extensions' doorways.
+
+The kennel's lamp follows the hideout's light switch like the areas' own lamps: off with the lights off or on candles, a tube's white light with fluorescent tubes, a bulb's warm light with bulbs and the holiday lights.
+
+### Found-in-raid materials
+
+F12 > Hideout > **Found-in-raid kennel materials** (off by default): on, a kennel level takes found-in-raid materials only (roubles aside), as the game's hardcore hideout does. The kennel's screen shows the found-in-raid mark on each material, counts only found-in-raid items, and hands only those over when you build. It takes effect the next time a kennel's screen opens. The server's owner can fix it for everyone (`kennelFoundInRaid` in `config.jsonc`).
+
+Most of the F12 settings are under "Advanced settings". Tick it to see them all.

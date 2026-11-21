@@ -144,7 +144,7 @@ namespace K9Companion
             var stage = root.AddComponent<DogStage>();
             stage.dog = new GameObject("K9 lobby dog").transform;
             stage.dog.SetParent(root.transform, false);
-            stage.model = DogModel.Load(Plugin.AssetFolder, stage.dog, Plugin.Scale.Value);
+            stage.model = DogModel.Load(Pack.ActiveBreed, Pack.ActiveCoat, stage.dog, Plugin.Scale.Value, Growth.ActiveScale);
             stage.decor = new CompanionDecor(stage.dog, stage.model);
             stage.decor.SetCosmetics(DogGear.CollarStyle(K9.SessionProfile));
             foreach (Transform t in root.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = layer;

@@ -57,6 +57,7 @@ namespace K9Companion.Fika
         {
             writer.Put(Looks.Owner); writer.Put(Looks.Vest ?? ""); writer.Put(Looks.Head ?? ""); writer.Put(Looks.Collar ?? "");
             writer.Put(Looks.Camera); writer.Put(Looks.Scale);
+            writer.Put(Looks.Breed ?? ""); writer.Put(Looks.Coat);
         }
 
         public void Deserialize(NetDataReader reader)
@@ -64,6 +65,8 @@ namespace K9Companion.Fika
             Looks.Owner = reader.GetInt();
             Looks.Vest = Named(reader.GetString()); Looks.Head = Named(reader.GetString()); Looks.Collar = Named(reader.GetString());
             Looks.Camera = reader.GetBool(); Looks.Scale = reader.GetFloat();
+            // Which dog (1.5.0): a player on an older version sends none, and their dog is drawn as the shepherd.
+            if (reader.AvailableBytes > 0) { Looks.Breed = Named(reader.GetString()); Looks.Coat = reader.GetInt(); }
         }
 
         private static string Named(string text) => string.IsNullOrEmpty(text) ? null : text;

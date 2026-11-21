@@ -86,7 +86,8 @@ public sealed class GameStartPatch : AbstractPatch
 {
     private static BagKeeper? keeper;
     private static K9Keeper? k9;
-    public GameStartPatch(BagKeeper bagKeeper, K9Keeper k9Keeper) { keeper = bagKeeper; k9 = k9Keeper; }
+    private static PackKeeper? pack;
+    public GameStartPatch(BagKeeper bagKeeper, K9Keeper k9Keeper, PackKeeper packKeeper) { keeper = bagKeeper; k9 = k9Keeper; pack = packKeeper; }
     protected override MethodBase GetTargetMethod() => AccessTools.Method(typeof(GameController), nameof(GameController.GameStart));
 
     // Before the game's profile check, which drops quests that no longer exist: Dr. Yang's retired quests hand their
@@ -99,6 +100,8 @@ public sealed class GameStartPatch : AbstractPatch
     {
         k9?.GameStarted(sessionId);
         keeper?.GameStarted(sessionId);
+        try { pack?.GameStarted(sessionId); }
+        catch (Exception e) { Console.WriteLine("[K9Companion] Setting up the dogs' gear holders: " + e.Message); }
     }
 }
 
@@ -238,6 +241,7 @@ public sealed class DogSettingsFile(ModHelper mods, ISptLogger<DogSettingsFile> 
           "carryLimit": null,        // 0 to 200: kg a dog's jacket can weigh before it slows down (0 = no limit).
           "godMode": null,           // true: dogs fight as usual but can't be hurt or killed. false: no god mode for anyone.
           "controlAfterDeath": null, // true: when you die you can carry on as your dog (if it's alive). false: not on this server.
+          "kennelFoundInRaid": null, // true: kennel levels take found-in-raid materials only (money aside). false: any. null: each player's F12 setting.
           "dogHealth": null          // 30 to 1000: a dog's hit points.
         }
         """.Replace("{TraderLine}", TraderLine);
@@ -310,6 +314,13 @@ public sealed class DogSettingsFile(ModHelper mods, ISptLogger<DogSettingsFile> 
                 "\"godMode\": null,           // true: dogs fight as usual but can't be hurt or killed. false: no god mode for anyone.\n" + indent +
                 "\"controlAfterDeath\": null, // true: when you die you can carry on as your dog (if it's alive). false: not on this server.\n" + indent);
         }
+        health = text.IndexOf("\"dogHealth\"", StringComparison.Ordinal);
+        if (!text.Contains("\"kennelFoundInRaid\"") && health >= 0)
+        {
+            string indent = new string(' ', health - (text.LastIndexOf('\n', health) + 1));
+            text = text.Insert(health,
+                "\"kennelFoundInRaid\": null, // true: kennel levels take found-in-raid materials only (money aside). false: any. null: each player's F12 setting.\n" + indent);
+        }
         File.WriteAllText(FilePath, text);
     }
 
@@ -343,7 +354,7 @@ public sealed class DogSettingsFile(ModHelper mods, ISptLogger<DogSettingsFile> 
                 if (known != null) answer["aggression"] = known;
                 else logger.Warning("[K9Companion] config.jsonc: aggression should be \"Passive\", \"Defensive\", \"Aggressive\" or null; ignored.");
             }
-            foreach (string key in new[] { "soloOnly", "downedMode", "godMode", "controlAfterDeath" })
+            foreach (string key in new[] { "soloOnly", "downedMode", "godMode", "controlAfterDeath", "kennelFoundInRaid" })
             {
                 if (file[key] is not JsonNode flag) continue;
                 if (flag.GetValueKind() is JsonValueKind.True or JsonValueKind.False) answer[key] = flag.GetValue<bool>();
@@ -407,3 +418,31 @@ public sealed class SettingsRouter(JsonUtil json, DogSettingsFile settings, VetK
     new RouteAction<VetUseRequest>("/k9companion/vet/use",
         (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(vet.Use(sessionId, info)))
 ]);
+
+// Dr. Yang's pet cards, per player: a breed's card is off his shelf once you have a dog of that breed or its card, so
+// every card bought is a breed you can still adopt (one dog of each).
+[Injectable]
+public sealed class CardShelfPatch : AbstractPatch
+{
+    private static ProfileHelper? profiles;
+    private static K9Store? store;
+    public CardShelfPatch(ProfileHelper profileHelper, K9Store k9Store) { profiles = profileHelper; store = k9Store; }
+    protected override MethodBase GetTargetMethod() => AccessTools.Method(typeof(SPTarkov.Server.Core.Helpers.Traders.TraderAssortHelper),
+        nameof(SPTarkov.Server.Core.Helpers.Traders.TraderAssortHelper.GetAssort));
+
+    [PatchPostfix]
+    public static void Postfix(MongoId sessionId, MongoId traderId, TraderAssort __result)
+    {
+        if (traderId != PackItems.Yang || __result?.Items == null || profiles == null || store == null) return;
+        try
+        {
+            PmcData? pmc = profiles.GetPmcProfile(sessionId);
+            HashSet<string> taken = Pack.Taken(pmc, store.Load(pmc));
+            var gone = Pack.Cards.Where(c => taken.Contains(c.Breed)).Select(c => c.Offer).ToHashSet();
+            if (gone.Count == 0) return;
+            __result.Items.RemoveAll(i => gone.Contains(i.Id));
+            foreach (MongoId offer in gone) { __result.BarterScheme?.Remove(offer); __result.LoyalLevelItems?.Remove(offer); }
+        }
+        catch (Exception e) { Console.WriteLine("[K9Companion] Dr. Yang's pet cards: " + e.Message); }
+    }
+}

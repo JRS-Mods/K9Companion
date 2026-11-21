@@ -606,6 +606,9 @@ namespace K9Companion
         // The loaded state, without loading it (null until something has).
         internal static DogNeeds Peek => current;
 
+        // Another dog is the active one now: its needs are read when next wanted.
+        internal static void Forget() { current = null; }
+
         internal static void Save()
         {
             if (current == null) return;
@@ -853,7 +856,9 @@ namespace K9Companion
         internal static bool? CombatMode;
         internal static DogApproach? Approach;
         internal static Aggression? Aggression;
-        internal static bool? SoloOnly, DownedMode, GodMode, ControlAfterDeath;
+        internal static bool? SoloOnly, DownedMode, GodMode, ControlAfterDeath, KennelFoundInRaid;
+        // Asked for at least once this game.
+        internal static bool Loaded;
         internal static float? EngageDistance, OrderRange, BitesToKill, BossBitesToKill, BiteCooldown, BiteStagger, DogHealth, AutoRushRange, DefendRange, BleedOutTime, CarryLimit;
         private static string applied = "{}";
         private static bool complained;
@@ -876,6 +881,7 @@ namespace K9Companion
             try { s = JObject.Parse(json); }
             catch (Exception) { return; }   // a server too old to have them answers with something else
             applied = json;
+            Loaded = true;
             CombatMode = s["combatMode"]?.Value<bool?>();
             Approach = Enum.TryParse(s["approach"]?.Value<string>(), true, out DogApproach how) ? how : (DogApproach?)null;
             AutoRushRange = s["autoRushRange"]?.Value<float?>();
@@ -893,6 +899,7 @@ namespace K9Companion
             DownedMode = s["downedMode"]?.Value<bool?>();
             GodMode = s["godMode"]?.Value<bool?>();
             ControlAfterDeath = s["controlAfterDeath"]?.Value<bool?>();
+            KennelFoundInRaid = s["kennelFoundInRaid"]?.Value<bool?>();
             BleedOutTime = s["bleedOutTime"]?.Value<float?>();
             CarryLimit = s["carryLimit"]?.Value<float?>();
             Plugin.Log.LogInfo(s.Count == 0 ? "Server's dog settings: none, every player uses their own." : "Server's dog settings (for everyone): " + json);

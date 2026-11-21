@@ -149,7 +149,8 @@ namespace K9Companion
             Item at = address?.Container?.ParentItem;
             for (int depth = 0; at != null && depth < 16; depth++)
             {
-                if (IsHolder(at) || IsJacket(at) || IsLocker(at)) return true;
+                // The dog holder, a jacket, a kennel locker, or the holder another of your dogs keeps its gear in (Pack).
+                if (IsHolder(at) || IsJacket(at) || IsLocker(at) || at.TemplateId.ToString() == Pack.RosterHolderTemplate) return true;
                 at = at.Parent?.Container?.ParentItem;
             }
             return false;
@@ -273,6 +274,7 @@ namespace K9Companion
 
         private static Sprite SpriteFor(Item item)
         {
+            // (The adoption papers are the game's own papers, with their own picture.)
             string look = DogGear.AnyLook(item);
             if (look == null) return null;
             // Items of different sizes can share a look (the 2x1 vet kit and the 1x1 vet supply case): one picture per size,
@@ -405,34 +407,17 @@ namespace K9Companion
                 var tex = new Texture2D(2, 2, TextureFormat.RGBA32, true);
                 if (ImageConversion.LoadImage(tex, File.ReadAllBytes(texturePath), false)) { tex.Compress(true); tex.Apply(true, true); material.mainTexture = tex; }
             }
-            // The supplies' normal map (the relief their full-detail model had) and metal/smoothness map, as the kennel
-            // props have them (PropModel): gear_<texture>_n.png and _ms.png, where the converter wrote them.
-            string stem = Path.Combine(Plugin.AssetFolder, "gear_" + texture);
-            Texture2D normal = DataTexture(stem + "_n.png", false), metalSmooth = DataTexture(stem + "_ms.png", true);
+            // The supplies' normal map (the relief their full-detail model had), as the kennel props have it (PropModel):
+            // gear_<texture>_n.png, where the converter wrote it. (No metal/smoothness map: the game's Standard shader has
+            // no variant that reads one, so the gloss above is what shows.)
+            Texture2D normal = TextureCache.LoadData(Path.Combine(Plugin.AssetFolder, "gear_" + texture + "_n.png"), TextureCache.Data.Normal);
             if (normal != null && material.HasProperty("_BumpMap"))
             {
+                normal.anisoLevel = 4;
                 mesh.RecalculateTangents();
                 material.SetTexture("_BumpMap", normal); material.SetFloat("_BumpScale", 1f); material.EnableKeyword("_NORMALMAP");
             }
-            if (metalSmooth != null && material.HasProperty("_MetallicGlossMap"))
-            {
-                material.SetTexture("_MetallicGlossMap", metalSmooth); material.EnableKeyword("_METALLICGLOSSMAP");
-                if (material.HasProperty("_GlossMapScale")) material.SetFloat("_GlossMapScale", 1f);
-            }
             return models[part] = (mesh, material);
-        }
-
-        // A map holding data rather than colour (normals, metal/smoothness): read as it is, without the colour correction,
-        // and kept only on the graphics card. The normal map stays uncompressed (block compression shows on its relief).
-        private static Texture2D DataTexture(string path, bool compress)
-        {
-            if (!File.Exists(path)) return null;
-            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, true, true) { name = Path.GetFileName(path) };
-            if (!ImageConversion.LoadImage(texture, File.ReadAllBytes(path), false)) return null;
-            texture.anisoLevel = 4;
-            if (compress) texture.Compress(true);
-            texture.Apply(true, true);
-            return texture;
         }
     }
 
@@ -736,7 +721,7 @@ namespace K9Companion
 
         internal static Texture2D Load(string path)
         {
-            string name = Path.GetFileName(path);
+            string name = CacheName(path);
             var source = new FileInfo(path);
             string stamp = (source.LastWriteTimeUtc.Ticks ^ source.Length).ToString("x");
             Texture2D texture = ReadBack(name, stamp);
@@ -754,8 +739,139 @@ namespace K9Companion
             return texture;
         }
 
+        /// <summary>
+        /// A coat with its fur strands' alpha (the breeds' coat_alpha.png, shared by their three coats) put in its alpha,
+        /// compressed with it (DXT5) and kept like the rest. Without an alpha file, the coat as it is.
+        /// </summary>
+        internal static Texture2D LoadCoat(string path, string alphaPath)
+        {
+            if (string.IsNullOrEmpty(alphaPath) || !File.Exists(alphaPath)) return Load(path);
+            string name = CacheName(path) + "~a";
+            var source = new FileInfo(path); var mask = new FileInfo(alphaPath);
+            string stamp = (source.LastWriteTimeUtc.Ticks ^ source.Length ^ (mask.LastWriteTimeUtc.Ticks * 31) ^ mask.Length).ToString("x");
+            Texture2D texture = ReadBack(name, stamp);
+            if (texture != null) return texture;
+            texture = new Texture2D(2, 2, TextureFormat.RGBA32, true);
+            var alpha = new Texture2D(2, 2, TextureFormat.RGBA32, false, true);
+            try
+            {
+                if (!ImageConversion.LoadImage(texture, File.ReadAllBytes(path), false) || !ImageConversion.LoadImage(alpha, File.ReadAllBytes(alphaPath), false))
+                {
+                    UnityEngine.Object.Destroy(texture);
+                    throw new InvalidDataException("Cannot decode " + name);
+                }
+                if (alpha.width != texture.width || alpha.height != texture.height)
+                {
+                    Plugin.Log.LogWarning($"{Path.GetFileName(alphaPath)} isn't the size of {Path.GetFileName(path)}: the coat has no fur strands.");
+                    texture.Compress(true); texture.Apply(false, true);
+                    return texture;
+                }
+                if (texture.format != TextureFormat.RGBA32)
+                {
+                    var rgba = new Texture2D(texture.width, texture.height, TextureFormat.RGBA32, true);
+                    rgba.SetPixels32(texture.GetPixels32());
+                    UnityEngine.Object.Destroy(texture);
+                    texture = rgba;
+                }
+                // A grey picture reads into one channel: red, or alpha when it's read as Alpha8.
+                bool alphaOnly = alpha.format == TextureFormat.Alpha8;
+                Color32[] colour = texture.GetPixels32(), cut = alpha.GetPixels32();
+                for (int i = 0; i < colour.Length; i++) colour[i].a = alphaOnly ? cut[i].a : cut[i].r;
+                texture.SetPixels32(colour);
+                texture.Apply(true, false);
+                texture.Compress(true);
+                Keep(name, stamp, texture);
+                texture.Apply(false, true);
+                return texture;
+            }
+            finally { UnityEngine.Object.Destroy(alpha); }
+        }
+
+        // Kept under its path inside the mod's folder: every breed has a coat1.jpg and a dog_n.png, and kept by file name
+        // alone each breed's threw out the last one's, so every coat was compressed again each time a dog was shown.
+        private static string CacheName(string path)
+        {
+            string full = Path.GetFullPath(path), root = Path.GetFullPath(Plugin.AssetFolder).TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
+            string rel = full.StartsWith(root, StringComparison.OrdinalIgnoreCase) ? full.Substring(root.Length) : Path.GetFileName(full);
+            return rel.Replace('\\', '_').Replace('/', '_');
+        }
+
+        internal enum Data { Normal, Gray }
+
+        // A PNG's colour type (IHDR, byte 25): 4 is grey with alpha.
+        private static bool IsGreyAlphaPng(byte[] file) => file.Length > 25 && file[0] == 0x89 && file[1] == (byte)'P' && file[12] == (byte)'I' && file[25] == 4;
+
+        /// <summary>
+        /// A map holding data rather than colour, read as it is (no colour correction) and kept only on the graphics card.
+        /// A normal map is compressed the way normal maps are (DXT5nm: x in the alpha, y in the green, which the shader's
+        /// unpacking reads; a quarter of the memory, the 2048 breed maps at about 5 MB each) and cached. A grey map (the shading in the folds)
+        /// is put in all three colours, as the shader reads its green, compressed (it's smooth) and cached like the colour
+        /// pictures. Null if it isn't there.
+        /// </summary>
+        internal static Texture2D LoadData(string path, Data kind)
+        {
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
+            if (kind == Data.Normal)
+            {
+                string cached = CacheName(path) + "~n";
+                var info = new FileInfo(path);
+                string normalStamp = (info.LastWriteTimeUtc.Ticks ^ info.Length).ToString("x");
+                Texture2D kept = ReadBack(cached, normalStamp, true);
+                if (kept != null) return kept;
+                byte[] file = File.ReadAllBytes(path);
+                var normal = new Texture2D(2, 2, TextureFormat.RGBA32, true, true) { name = Path.GetFileName(path) };
+                if (!ImageConversion.LoadImage(normal, file, false)) { UnityEngine.Object.Destroy(normal); return null; }
+                // Shipped as grey + alpha (tools/pack_normals.py): x in the grey, y in the alpha. The shader works out the
+                // third part (z) from those two itself, so the blue it never read isn't shipped. Put back as x, y here.
+                if (IsGreyAlphaPng(file))
+                {
+                    // (Read into four channels as grey, grey, grey, alpha; into two, as red and green.)
+                    bool twoChannels = normal.format == TextureFormat.RG16;
+                    Color32[] px = normal.GetPixels32();
+                    for (int i = 0; i < px.Length; i++) { Color32 c = px[i]; px[i] = new Color32(c.r, twoChannels ? c.g : c.a, 255, 255); }
+                    var xy = new Texture2D(normal.width, normal.height, TextureFormat.RGBA32, true, true) { name = normal.name };
+                    xy.SetPixels32(px);
+                    UnityEngine.Object.Destroy(normal);
+                    normal = xy;
+                }
+                // DXT5nm: (1, y, y, x). Unity's unpacking (UnpackNormalmapRGorAG) multiplies red into alpha for x and takes
+                // y from green, so the same shader reads this and the plain x, y layout alike.
+                Color32[] n = normal.GetPixels32();
+                for (int i = 0; i < n.Length; i++) { Color32 c = n[i]; n[i] = new Color32(255, c.g, c.g, c.r); }
+                var nm = new Texture2D(normal.width, normal.height, TextureFormat.RGBA32, true, true) { name = normal.name };
+                nm.SetPixels32(n);
+                UnityEngine.Object.Destroy(normal);
+                nm.Apply(true, false);
+                nm.Compress(true);
+                Keep(cached, normalStamp, nm);
+                nm.Apply(false, true);
+                return nm;
+            }
+            string name = CacheName(path) + "~g";
+            var source = new FileInfo(path);
+            string stamp = (source.LastWriteTimeUtc.Ticks ^ source.Length).ToString("x");
+            Texture2D texture = ReadBack(name, stamp, true);
+            if (texture != null) return texture;
+            var raw = new Texture2D(2, 2, TextureFormat.RGBA32, false, true);
+            try
+            {
+                if (!ImageConversion.LoadImage(raw, File.ReadAllBytes(path), false)) return null;
+                bool alphaOnly = raw.format == TextureFormat.Alpha8;
+                Color32[] px = raw.GetPixels32();
+                for (int i = 0; i < px.Length; i++) { byte g = alphaOnly ? px[i].a : px[i].r; px[i] = new Color32(g, g, g, 255); }
+                texture = new Texture2D(raw.width, raw.height, TextureFormat.RGB24, true, true) { name = Path.GetFileName(path) };
+                texture.SetPixels32(px);
+                texture.Apply(true, false);
+                texture.Compress(true);
+                Keep(name, stamp, texture);
+                texture.Apply(false, true);
+                return texture;
+            }
+            finally { UnityEngine.Object.Destroy(raw); }
+        }
+
         // <picture>.<stamp>.<width>.<height>.<format>.tex
-        private static Texture2D ReadBack(string name, string stamp)
+        private static Texture2D ReadBack(string name, string stamp, bool linear = false)
         {
             try
             {
@@ -763,7 +879,7 @@ namespace K9Companion
                 string file = Directory.GetFiles(Folder, name + "." + stamp + ".*.tex").FirstOrDefault();
                 if (file == null) return null;
                 string[] parts = Path.GetFileName(file).Substring(name.Length + stamp.Length + 2).Split('.');
-                var texture = new Texture2D(int.Parse(parts[0]), int.Parse(parts[1]), (TextureFormat)int.Parse(parts[2]), true);
+                var texture = new Texture2D(int.Parse(parts[0]), int.Parse(parts[1]), (TextureFormat)int.Parse(parts[2]), true, linear);
                 texture.LoadRawTextureData(File.ReadAllBytes(file));
                 texture.Apply(false, true);
                 return texture;
@@ -843,7 +959,7 @@ namespace K9Companion
                     dog.Dog = new GameObject("K9 Companion dog");
                     dog.Dog.SetActive(false);
                     UnityEngine.Object.DontDestroyOnLoad(dog.Dog);
-                    dog.Model = DogModel.Load(Plugin.AssetFolder, dog.Dog.transform, Plugin.Scale.Value);
+                    dog.Model = DogModel.Load(Pack.ActiveBreed, Pack.ActiveCoat, dog.Dog.transform, Plugin.Scale.Value, Growth.ActiveScale);
                 },
                 () => dog.Decor = new CompanionDecor(dog.Dog.transform, dog.Model),
                 () => dog.Decor.SetVest(vest),
@@ -853,7 +969,7 @@ namespace K9Companion
                 // Not the sounds: the game restarts its audio (AudioSettings.Reset) while a raid loads, after this has run, and
                 // that silences clips made before it. They take no time to make when the dog comes out.
             };
-            while (!DogModel.ClipsReady) yield return null;
+            while (!DogModel.ClipsReady(Pack.ActiveBreed)) yield return null;
             foreach (Action step in steps)
             {
                 try { step(); }

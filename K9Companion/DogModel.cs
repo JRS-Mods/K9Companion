@@ -46,7 +46,8 @@ namespace K9Companion
             public static Pose Blend(Pose a, Pose b, float t)
             { return new Pose { P = Vector3.Lerp(a.P, b.P, t), Q = Quaternion.Slerp(a.Q, b.Q, t), S = Vector3.Lerp(a.S, b.S, t) }; }
         }
-        private sealed class Clip { public int Frames; public float Fps; public Pose[] Poses; }
+        // Loop: the last frame is the first again (a cycle), so frames carry on round the end.
+        private sealed class Clip { public int Frames; public float Fps; public Pose[] Poses; public bool Loop; }
 
         // A clip's number on the wire (DogNet): every copy of the mod has the same list.
         public static int ClipNumber(string name) => name == null ? -1 : Array.IndexOf(Required, name);
@@ -58,9 +59,14 @@ namespace K9Companion
         private Transform root;
         private Matrix4x4[] bind;
         private Pose[] displayed, previous;
-        // Clip data never changes, so every dog (raid, hideout, the raid screen's, other players') shares one copy.
-        private static Dictionary<string, Clip> sharedClips;
-        private static Task<Dictionary<string, Clip>> clipsLoading;
+        private Vector3[] applied;
+        // The box every pose of the dog fits in (lying, a jump's height), in the model's own space: what the game culls by.
+        private Bounds poseBounds;
+        private readonly List<Renderer> renderers = new List<Renderer>();
+        // Clip data never changes, so every dog of a breed (raid, hideout, the raid screen's, other players') shares one
+        // copy, kept per breed's file.
+        private static readonly Dictionary<string, Dictionary<string, Clip>> sharedClips = new Dictionary<string, Dictionary<string, Clip>>();
+        private static readonly Dictionary<string, Task<Dictionary<string, Clip>>> clipsLoading = new Dictionary<string, Task<Dictionary<string, Clip>>>();
         private Dictionary<string, Clip> clips;
         private readonly List<UnityEngine.Object> resources = new List<UnityEngine.Object>();
         private string current;
@@ -76,9 +82,17 @@ namespace K9Companion
         // The head and neck turning on top of the animation (LookAt).
         private Transform[] lookChain;
         private static readonly float[] LookShare = { .1f, .15f, .2f, .25f, .3f };
+        private float[] lookShare = LookShare;
         private float lookYaw, lookPitch, wantYaw, wantPitch;
 
         public string Current => current;
+        // Set for dogs that only lie about (the hideout's other dogs): unseen, their bones aren't moved.
+        public bool SkipUnseen { get; set; }
+        public Breed Breed { get; private set; }
+        public int Coat { get; private set; }
+        // Its growth (size against its model as made, Growth) and its whole size on screen (with the Scale setting).
+        public float Growth { get; private set; } = 1;
+        public float Size => Root != null ? Root.localScale.x : Growth;
         // What it's playing, as another player's machine needs to play the same (DogNet).
         public string Layer { get; private set; }
         public float LayerWeight { get; private set; }
@@ -101,13 +115,33 @@ namespace K9Companion
         { int n = r.ReadInt32(); if (n < 0 || n > max) throw new InvalidDataException("Invalid dog asset count: " + n); return n; }
         private static string Text(BinaryReader r) { return Encoding.UTF8.GetString(r.ReadBytes(Count(r, 4096))); }
 
-        // Reads the animations in the background when the game starts: plain data, a lot of it, that needs nothing of Unity's.
-        internal static void WarmUp(string folder)
+        // Reads a breed's animations in the background (when the game starts, and when a dog of that breed is due): plain
+        // data, a lot of it, that needs nothing of Unity's.
+        internal static void WarmUp(Breed breed)
         {
-            if (sharedClips == null && clipsLoading == null) clipsLoading = Task.Run(() => ReadClips(Path.Combine(folder, "k9dog.dog")));
+            string path = breed.DogFile;
+            lock (sharedClips)
+                if (!sharedClips.ContainsKey(path) && !clipsLoading.ContainsKey(path)) clipsLoading[path] = Task.Run(() => ReadClips(path));
         }
 
-        internal static bool ClipsReady => clipsLoading == null || clipsLoading.IsCompleted;
+        internal static bool ClipsReady(Breed breed)
+        {
+            lock (sharedClips) return !clipsLoading.TryGetValue(breed.DogFile, out var t) || t.IsCompleted;
+        }
+
+        private static Dictionary<string, Clip> ClipsOf(string path)
+        {
+            Task<Dictionary<string, Clip>> loading;
+            lock (sharedClips)
+            {
+                if (sharedClips.TryGetValue(path, out var ready)) return ready;
+                clipsLoading.TryGetValue(path, out loading);
+            }
+            // Ready by now, normally: if not, this waits for the background read, and it's read here if that failed.
+            Dictionary<string, Clip> read = loading != null && !loading.IsFaulted ? loading.Result : ReadClips(path);
+            lock (sharedClips) { sharedClips[path] = read; clipsLoading.Remove(path); }
+            return read;
+        }
 
         private static Dictionary<string, Clip> ReadClips(string path)
         {
@@ -134,6 +168,7 @@ namespace K9Companion
                     var clip = new Clip { Frames = nf, Fps = fps, Poses = new Pose[nf * n] };
                     for (int i = 0; i < clip.Poses.Length; i++) clip.Poses[i] = ReadPose(r);
                     if (name.StartsWith("Loco_")) CloseLoop(clip, n);
+                    clip.Loop = nf > 3 && EndsAsItBegins(clip, n);
                     read[name] = clip;
                 }
                 if (r.BaseStream.Position != r.BaseStream.Length) throw new InvalidDataException("Unexpected trailing dog data");
@@ -141,33 +176,61 @@ namespace K9Companion
             }
         }
 
-        public static DogModel Load(string folder, Transform parent, float scale)
+        /// <summary>
+        /// A dog of that breed in that coat (1 to breed.Coats), at the given size against its real one (the Scale setting),
+        /// grown to 'growth' of its model as made (Growth: young dogs smaller, grown ones a little bigger).
+        /// </summary>
+        public static DogModel Load(Breed breed, int coat, Transform parent, float scale, float growth = 1)
         {
-            var result = new DogModel();
-            try { result.Read(folder, parent, scale); return result; }
+            var result = new DogModel { Breed = breed ?? Breed.Shepherd, Coat = coat, Growth = growth };
+            try { result.Read(result.Breed, coat, parent, scale * growth); return result; }
             catch { result.Dispose(); throw; }
         }
 
-        private void Read(string folder, Transform parent, float scale)
+        private void Read(Breed breed, int coat, Transform parent, float scale)
         {
             var visual = new GameObject("K9 dog");
             visual.transform.SetParent(parent, false);
             Shader shader = Shader.Find("Standard") ?? Shader.Find("Legacy Shaders/Diffuse");
             if (shader == null) throw new InvalidOperationException("No supported lit shader found in the game.");
-            Texture2D texture = TextureCache.Load(Path.Combine(folder, "k9dog.png"));
-            resources.Add(texture);
+            Texture2D texture = Shared(breed.CoatFile(coat) + "|" + breed.AlphaFile, () => TextureCache.LoadCoat(breed.CoatFile(coat), breed.AlphaFile));
             texture.wrapMode = TextureWrapMode.Repeat;
-            texture.anisoLevel = 4;
+            texture.anisoLevel = 8;
             var material = new Material(shader) { name = "K9 coat", mainTexture = texture, color = Color.white };
             resources.Add(material);
             if (material.HasProperty("_Glossiness")) material.SetFloat("_Glossiness", 0.18f);
             if (material.HasProperty("_Metallic")) material.SetFloat("_Metallic", 0f);
-            using (var r = new BinaryReader(File.OpenRead(Path.Combine(folder, "k9dog.dog"))))
+            // The breeds' fur strands (on cards round the body's edge) are cut out of their cards by the coat's alpha. The
+            // game's Standard shader has a cut-out variant with a normal map only with specular highlights off (deferred and
+            // forward alike), and fur barely has any, so those go.
+            if (breed.AlphaFile != null && material.HasProperty("_Cutoff"))
+            {
+                material.SetFloat("_Mode", 1); material.SetFloat("_Cutoff", .4f);
+                material.EnableKeyword("_ALPHATEST_ON"); material.EnableKeyword("_SPECULARHIGHLIGHTS_OFF");
+                if (material.HasProperty("_SpecularHighlights")) material.SetFloat("_SpecularHighlights", 0);
+                material.SetOverrideTag("RenderType", "TransparentCutout");
+                material.renderQueue = 2450;   // the alpha-test queue
+            }
+            // The breeds come with the fur's relief and its shading in the folds (the shepherd has its colour alone). The
+            // game's Standard shader has normal-map variants but none for a metal/gloss map, so fur sheen stays the one
+            // value above; the folds' shading (ambient occlusion) needs no variant.
+            Texture2D normal = DataTexture(breed.NormalFile, TextureCache.Data.Normal), occlusion = DataTexture(breed.OcclusionFile, TextureCache.Data.Gray);
+            if (normal != null && material.HasProperty("_BumpMap"))
+            {
+                material.SetTexture("_BumpMap", normal); material.SetFloat("_BumpScale", 1f); material.EnableKeyword("_NORMALMAP");
+            }
+            if (occlusion != null && material.HasProperty("_OcclusionMap"))
+            {
+                material.SetTexture("_OcclusionMap", occlusion);
+                if (material.HasProperty("_OcclusionStrength")) material.SetFloat("_OcclusionStrength", 1f);
+            }
+            using (var r = new BinaryReader(File.OpenRead(breed.DogFile)))
             {
                 if (r.ReadInt32() != 0x31474f44) throw new InvalidDataException("Unsupported k9dog.dog version");
                 int n = Count(r, 512);
                 if (n == 0) throw new InvalidDataException("Dog has no skeleton");
                 bones = new Transform[n]; displayed = new Pose[n]; previous = new Pose[n];
+                applied = Enumerable.Repeat(new Vector3(float.NaN, float.NaN, float.NaN), n).ToArray();
                 offsetTurn = new Vector3[n]; turnRate = new Vector3[n]; offsetSlide = new Vector3[n]; slideRate = new Vector3[n];
                 for (int i = 0; i < n; i++)
                 {
@@ -182,16 +245,18 @@ namespace K9Companion
                 for (int i = 0; i < n; i++) bind[i] = bones[i].worldToLocalMatrix * visual.transform.localToWorldMatrix;
                 root = visual.transform;
                 int meshCount = Count(r, 64);
-                for (int m = 0; m < meshCount; m++) ReadMesh(r, material, visual.transform, bind);
+                for (int m = 0; m < meshCount; m++)
+                {
+                    GameObject body = ReadMesh(r, material, visual.transform, bind);
+                    if (normal != null) body.GetComponent<SkinnedMeshRenderer>().sharedMesh.RecalculateTangents();
+                }
             }
-            // Ready by now, normally: if not, this waits for the background read, and it's read here if that failed.
-            if (sharedClips == null)
-            {
-                if (clipsLoading != null && !clipsLoading.IsFaulted) sharedClips = clipsLoading.Result;
-                else sharedClips = ReadClips(Path.Combine(folder, "k9dog.dog"));
-            }
-            clips = sharedClips;
+            clips = ClipsOf(breed.DogFile);
             lookChain = new[] { "RigNeck1", "RigNeck2", "RigNeck3", "RigNeck4", "RigHead" }.Select(Bone).Where(b => b != null).ToArray();
+            // The shepherd's five neck and head bones share the turn as LookShare has it; a breed with fewer (one neck bone)
+            // shares the whole turn among them, more towards the head.
+            lookShare = lookChain.Length == LookShare.Length ? LookShare
+                : Enumerable.Range(1, lookChain.Length).Select(i => i / (lookChain.Length * (lookChain.Length + 1) / 2f)).ToArray();
             legBones = Enumerable.Range(0, bones.Length).Where(i => bones[i].name.Contains("Leg")).ToArray();
             foreach (string name in Required)
                 if (!clips.ContainsKey(name)) throw new InvalidDataException("Missing animation: " + name);
@@ -232,25 +297,46 @@ namespace K9Companion
                 mesh.SetTriangles(indices, s); materials[s] = material;
             }
             mesh.RecalculateBounds();
+            // The body comes first: the box round every pose is made from it, and the gear worn uses the same.
+            if (poseBounds.size == Vector3.zero) poseBounds = Around(mesh.bounds);
             var go = new GameObject(name); go.transform.SetParent(visual, false);
             var renderer = go.AddComponent<SkinnedMeshRenderer>();
-            renderer.sharedMesh = mesh; renderer.bones = bones; renderer.rootBone = bones[0]; renderer.sharedMaterials = materials;
+            // The bounds are kept in the model's own space (rootBone = the model, which doesn't animate). They were in the
+            // first bone's, which carries the skeleton's centimetre scale (0.01): the "4 m" box was 4 cm, at the new breeds'
+            // feet, and the whole dog vanished whenever that spot was off screen or behind something.
+            renderer.sharedMesh = mesh; renderer.bones = bones; renderer.rootBone = visual; renderer.sharedMaterials = materials;
             renderer.quality = SkinQuality.Bone4; renderer.shadowCastingMode = ShadowCastingMode.On;
             renderer.receiveShadows = true;
             // Its bounds are set wide enough for every pose, so it isn't skinned while nobody can see it.
             renderer.updateWhenOffscreen = false;
-            renderer.localBounds = new Bounds(new Vector3(0, 0.75f, 0), new Vector3(4, 4, 4));
+            renderer.localBounds = poseBounds;
+            renderers.Add(renderer);
             return go;
+        }
+
+        // Standing, lying on its side, rolled over dead or at the top of a jump: the body's rest box, grown to hold them all.
+        private static Bounds Around(Bounds body)
+        {
+            // (A standing leap stretches a short-backed dog out far beyond its length: the Rottweiler's hind paw went 18 cm
+            // past a box half its height longer than it.)
+            float h = Mathf.Max(.2f, body.max.y);
+            return new Bounds(new Vector3(0, h * .8f, body.center.z), 2 * new Vector3(h + .1f, h * 1.3f + .1f, body.extents.z + h * .75f + .15f));
+        }
+
+        /// <summary>Whether any camera (or a shadow it casts) needs the dog drawn this frame.</summary>
+        public bool Seen
+        {
+            get { foreach (Renderer r in renderers) if (r != null && r.isVisible) return true; return false; }
         }
 
         // Something the dog wears (jacket.mesh + its texture), skinned to the dog's own bones so it moves with every
         // animation. Null when the files aren't there; the caller then falls back to its own simple version.
+        // The model is the one fitted to this dog's breed (in its folder); the texture is the same for every dog.
         public GameObject LoadWearable(string folder, string meshFile, string textureFile)
         {
-            string meshPath = Path.Combine(folder, meshFile), texturePath = Path.Combine(folder, textureFile);
+            string meshPath = Path.Combine(Breed.IsShepherd ? folder : Breed.Folder, meshFile), texturePath = Path.Combine(folder, textureFile);
             if (!File.Exists(meshPath) || !File.Exists(texturePath)) return null;
-            Texture2D texture = TextureCache.Load(texturePath);
-            resources.Add(texture);
+            Texture2D texture = Shared(texturePath, () => TextureCache.Load(texturePath));
             var material = new Material(Shader.Find("Standard") ?? Shader.Find("Legacy Shaders/Diffuse")) { name = meshFile, mainTexture = texture, color = Color.white };
             resources.Add(material);
             if (material.HasProperty("_Glossiness")) material.SetFloat("_Glossiness", 0.3f);
@@ -264,8 +350,22 @@ namespace K9Companion
             }
         }
 
+        // A map holding data rather than colour (normals, shading): read as it is, without the colour correction.
+        private Texture2D DataTexture(string path, TextureCache.Data kind)
+        {
+            Texture2D texture = Shared(path + "|" + kind, () => TextureCache.LoadData(path, kind));
+            if (texture != null) texture.anisoLevel = 4;
+            return texture;
+        }
+
+        // Only what changed is set: every transform write is work for Unity (the skin's bounds, children), and a bone's
+        // scale almost never changes.
         private void Apply(int i, Pose p)
-        { bones[i].localPosition = p.P; bones[i].localRotation = p.Q; bones[i].localScale = p.S; }
+        {
+            Transform b = bones[i];
+            b.SetLocalPositionAndRotation(p.P, p.Q);
+            if (p.S != applied[i]) { b.localScale = p.S; applied[i] = p.S; }
+        }
 
         // Some gait clips end a little away from where they begin (a front leg by 10 degrees in the walk, the tongue by 17 in
         // the sprint), which showed as a jerk every stride. What's missing is shared out over the cycle.
@@ -282,6 +382,19 @@ namespace K9Companion
                     clip.Poses[at].Q = PoseMath.Mul(PoseMath.Exp(miss * ((float)k / last)), clip.Poses[at].Q);
                 }
             }
+        }
+
+        // Every bone ends within a degree and a millimetre (in the skeleton's centimetres: 0.1) of where it began.
+        private static bool EndsAsItBegins(Clip clip, int boneCount)
+        {
+            int last = (clip.Frames - 1) * boneCount;
+            for (int b = 0; b < boneCount; b++)
+            {
+                Pose s = clip.Poses[b], e = clip.Poses[last + b];
+                float dot = Math.Abs(s.Q.x * e.Q.x + s.Q.y * e.Q.y + s.Q.z * e.Q.z + s.Q.w * e.Q.w);
+                if (dot < .99996f || (s.P - e.P).sqrMagnitude > .01f) return false;
+            }
+            return true;
         }
 
         // How long the next change of clip takes to settle.
@@ -325,13 +438,22 @@ namespace K9Companion
         {
             if (current != name) Begin(name, layer, weight, 0);
             Clip clip = clips[current];
-            time += dt * speed;
+            // (A breed's one-off clips at its own pace: Breed.Timing.)
+            time += dt * Breed.Timing(current, speed);
             float last = clip.Frames - 1;
             float frame = time * clip.Fps;
             bool done = !loop && frame >= last;
             frame = loop ? frame % last : Mathf.Min(frame, last - 0.001f);
             Progress = frame / last;
             Clip other = layer != null && weight > 0.001f ? clips[layer] : null;
+            // Nobody sees it, nor its shadow: the clip runs on, but the bones are left where they are.
+            if (SkipUnseen && !Seen)
+            {
+                if (settling) { sinceSwitch += dt; if (settleRate * sinceSwitch > 7) settling = false; }
+                Layer = layer; LayerWeight = weight; Playback = speed; Looping = loop; Walking = false;
+                wantYaw = wantPitch = 0;
+                return done;
+            }
             float keep = 0, keepRate = 0;
             if (settling)
             {
@@ -401,7 +523,7 @@ namespace K9Companion
             if (Mathf.Abs(lookYaw) + Mathf.Abs(lookPitch) < .2f) return;
             Vector3 up = root.up, right = root.right;
             for (int i = 0; i < lookChain.Length; i++)
-                lookChain[i].rotation = Quaternion.AngleAxis(lookYaw * LookShare[i], up) * Quaternion.AngleAxis(lookPitch * LookShare[i], right) * lookChain[i].rotation;
+                lookChain[i].rotation = Quaternion.AngleAxis(lookYaw * lookShare[i], up) * Quaternion.AngleAxis(lookPitch * lookShare[i], right) * lookChain[i].rotation;
         }
 
         public void Restart() { current = null; }
@@ -437,13 +559,66 @@ namespace K9Companion
 
         public float Progress { get; private set; }
 
+        // Between two of the clip's frames along a smooth curve through the frames either side (Catmull-Rom), rather than in
+        // a straight line from one to the next: the clips are sampled at 30 a second, and a fast leg swing drawn straight
+        // between them turned sharply at every frame. A loop's frames run on round its end.
         private Pose Sample(Clip clip, float frame, int bone)
         {
-            int first = (int)frame;
-            return Pose.Blend(clip.Poses[first * bones.Length + bone], clip.Poses[(first + 1) * bones.Length + bone], frame - first);
+            int n = bones.Length, last = clip.Frames - 1;
+            int i1 = (int)frame; float t = frame - i1;
+            if (i1 >= last) { i1 = last - 1; t = 1; }
+            if (i1 < 0) { i1 = 0; t = 0; }
+            int i2 = i1 + 1;
+            int i0 = i1 > 0 ? i1 - 1 : clip.Loop ? last - 1 : 0;
+            int i3 = i2 < last ? i2 + 1 : clip.Loop ? 1 : last;
+            Pose p0 = clip.Poses[i0 * n + bone], p1 = clip.Poses[i1 * n + bone], p2 = clip.Poses[i2 * n + bone], p3 = clip.Poses[i3 * n + bone];
+            float t2 = t * t, t3 = t2 * t;
+            float a = -.5f * t3 + t2 - .5f * t, b = 1.5f * t3 - 2.5f * t2 + 1, c = -1.5f * t3 + 2 * t2 + .5f * t, d = .5f * t3 - .5f * t2;
+            Quaternion q0 = Near(p0.Q, p1.Q), q2 = Near(p2.Q, p1.Q), q3 = Near(p3.Q, q2), q1 = p1.Q;
+            var q = new Quaternion(a * q0.x + b * q1.x + c * q2.x + d * q3.x, a * q0.y + b * q1.y + c * q2.y + d * q3.y,
+                                   a * q0.z + b * q1.z + c * q2.z + d * q3.z, a * q0.w + b * q1.w + c * q2.w + d * q3.w);
+            float len = (float)Math.Sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+            if (len < 1e-6f) q = Quaternion.Slerp(p1.Q, p2.Q, t);
+            else { float k = 1 / len; q.x *= k; q.y *= k; q.z *= k; q.w *= k; }
+            return new Pose { P = a * p0.P + b * p1.P + c * p2.P + d * p3.P, Q = q, S = Vector3.LerpUnclamped(p1.S, p2.S, t) };
+        }
+
+        // The same rotation as q, on the same side of the sphere as 'like' (so the curve doesn't swing the long way round).
+        private static Quaternion Near(Quaternion q, Quaternion like)
+            => q.x * like.x + q.y * like.y + q.z * like.z + q.w * like.w < 0 ? new Quaternion(-q.x, -q.y, -q.z, -q.w) : q;
+
+        // Pictures shared by every dog showing them (the hideout's dog, the DOG tab's and the raid screen's pictures of it, the
+        // raid's dog made ready while loading): one copy on the graphics card, freed with the last dog using it.
+        private static readonly Dictionary<string, (Texture2D Texture, int Users)> sharedTextures = new Dictionary<string, (Texture2D, int)>();
+        private readonly List<string> sharedUsed = new List<string>();
+
+        private Texture2D Shared(string key, Func<Texture2D> load)
+        {
+            if (string.IsNullOrEmpty(key)) return null;
+            if (sharedTextures.TryGetValue(key, out var known) && known.Texture != null)
+                sharedTextures[key] = (known.Texture, known.Users + 1);
+            else
+            {
+                Texture2D made = load();
+                if (made == null) return null;
+                sharedTextures[key] = known = (made, 1);
+            }
+            sharedUsed.Add(key);
+            return sharedTextures[key].Texture;
         }
 
         public void Dispose()
-        { DogSnow.Remove(root); foreach (var resource in resources) if (resource != null) UnityEngine.Object.Destroy(resource); resources.Clear(); }
+        {
+            DogSnow.Remove(root);
+            foreach (var resource in resources) if (resource != null) UnityEngine.Object.Destroy(resource);
+            resources.Clear();
+            foreach (string key in sharedUsed)
+            {
+                if (!sharedTextures.TryGetValue(key, out var known)) continue;
+                if (known.Users > 1) sharedTextures[key] = (known.Texture, known.Users - 1);
+                else { sharedTextures.Remove(key); if (known.Texture != null) UnityEngine.Object.Destroy(known.Texture); }
+            }
+            sharedUsed.Clear();
+        }
     }
 }

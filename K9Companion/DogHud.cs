@@ -1,6 +1,7 @@
 using System;
 using EFT.CameraControl;
 using EFT.UI;
+using EFT.UI.Screens;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -95,7 +96,9 @@ namespace K9Companion
                 var owner = Dog?.Owner;
                 Camera view = CameraManager.Instance?.Camera;
                 bool show = Plugin.HealthBar.Value && Dog != null && Dog.CanBeHurt && owner != null && owner.HealthController != null
-                            && (owner.HealthController.IsAlive || Companion.Controlling) && !owner.IsInventoryOpened && view != null;
+                            && (owner.HealthController.IsAlive || Companion.Controlling) && !owner.IsInventoryOpened && view != null
+                            // Only over the raid itself: not on the pause menu (Esc) or any other screen in front of it.
+                            && (EftScreenManager.Instance == null || EftScreenManager.Instance.CheckCurrentScreen(EEftScreenType.BattleUI));
                 bool onHud = Plugin.HealthBarAt.Value == HealthBarPlace.UnderYourHealth;
                 // Through the viewport, so it lands right whatever the game renders at (resolution scaling, upscalers).
                 Vector3 viewport = show && !onHud ? view.WorldToViewportPoint(Dog.OverheadPoint) : Vector3.zero;

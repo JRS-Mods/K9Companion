@@ -501,6 +501,9 @@ public sealed class BagKeeper(ISptLogger<BagKeeper> logger, ProfileHelper profil
         return holder != null && item.ParentId == holder.Id.ToString() && item.SlotId == DogGear.Slot;
     }
 
+    /// <summary>Puts a new hidden item (a roster holder) in the quest stash.</summary>
+    public bool PlaceInQuestStash(PmcData pmc, MongoId id) => Place(pmc, id, pmc.Inventory!.QuestStashItems);
+
     // Places an item (with children) in a stash-like container's grid: the stash, or the quest stash for the holder.
     private bool Place(PmcData pmc, MongoId bagId, MongoId? stashId)
     {

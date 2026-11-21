@@ -94,7 +94,7 @@ namespace K9Companion
 
         private void InitCombat()
         {
-            rules = Plugin.Rules(false);
+            rules = Breedwise(Plugin.Rules(false));
             combatWas = rules.Combat;
             // A dog still nursing wounds from an earlier combat raid starts with what it has left.
             health = rules.Health * (Plugin.CarryOverInjuries.Value && needs != null ? Mathf.Clamp(needs.Health, 1, 100) / 100f : 1f);
@@ -110,14 +110,16 @@ namespace K9Companion
             torso = Hitbox<CapsuleCollider>(root.transform, "Torso", 1f);
             neck = Hitbox<CapsuleCollider>(root.transform, "Neck", 1.25f);
             skull = Hitbox<SphereCollider>(root.transform, "Head", 1.8f);
-            torso.radius = .16f; torso.direction = 2;
-            neck.radius = .09f; neck.direction = 2;
-            skull.radius = .11f;
+            // Sized for the shepherd: a smaller breed is a smaller target.
+            float size = Mathf.Clamp(DogSize, .4f, 1.5f);
+            torso.radius = .16f * size; torso.direction = 2;
+            neck.radius = .09f * size; neck.direction = 2;
+            skull.radius = .11f * size;
             hitboxes = root.transform;
             // What your interact key finds when you look at the dog ("Open jacket"); alive or dead, the jacket can be reached.
             var zone = new GameObject("K9 interaction") { layer = LayerMask.NameToLayer("Interactive") };
             zone.transform.SetParent(dog.transform, false);
-            var box = zone.AddComponent<BoxCollider>(); box.isTrigger = true; box.size = new Vector3(.36f, .5f, .95f);
+            var box = zone.AddComponent<BoxCollider>(); box.isTrigger = true; box.size = new Vector3(.36f, .5f, .95f) * Mathf.Clamp(DogSize, .5f, 1.5f);
             zone.AddComponent<DogInteractive>().Dog = this;
             interactZone = zone.transform;
             Raid = this;
@@ -356,7 +358,7 @@ namespace K9Companion
         // kit brings back a downed dog).
         private void SyncRules()
         {
-            rules = Plugin.Rules(IsHideout);
+            rules = Breedwise(Plugin.Rules(IsHideout));
             if (hitboxes == null) return;
             if (!rules.Combat && combatWas) CancelTasks();
             combatWas = rules.Combat;
