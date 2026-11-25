@@ -606,11 +606,13 @@ namespace K9Companion
             var s = new CombatSense
             {
                 Now = Time.time, Follow = Plugin.Distance.Value, StrikeDone = strikeDone, Stalking = stalking,
-                DogFromOwner = Vector3.Distance(dog.transform.position, owner.Transform.position)
+                DogFromOwner = controlled ? 0 : Vector3.Distance(dog.transform.position, owner.Transform.position)
             };
             if (attackTarget == null || !(s.TargetValid = IsEnemy(attackTarget, owner))) return s;
             Vector3 at = attackTarget.Transform.position;
-            s.TargetFromOwner = Vector3.Distance(at, owner.Transform.position);
+            // Playing the dog after you died, it's the dog the fight is near, not your body: far from that it dropped every
+            // attack the moment it was sent in.
+            s.TargetFromOwner = Vector3.Distance(at, controlled ? dog.transform.position : owner.Transform.position);
             if (Time.time >= nextReachCheck) { nextReachCheck = Time.time + 1; reachable = Reachable(at); }
             if (Time.time >= nextSightCheck) { nextSightCheck = Time.time + .2f; inSight = ClearLine(HeadPoint, Body(attackTarget)); }
             s.Reachable = reachable; s.LineOfSight = inSight;
@@ -753,8 +755,9 @@ namespace K9Companion
             };
             // Through the game's (and with Fika, the network's) own hit handling, with no collider named: no armour covers
             // "none", as with the game's own hits that have no collider. A problem in there costs this bite, not the dog.
+            DogKill.Bite(attackTarget);
             try { throat.playerBridge.ApplyShot(info, EBodyPart.Head, EBodyPartColliderType.None, 0, ShotId.EMPTY_SHOT_ID); }
-            catch (System.Exception e) { Plugin.Log.LogWarning("The dog's bite: " + e.Message); }
+            catch (System.Exception e) { Plugin.Log.LogWarning("The dog's bite: " + e); }
             audio?.Play("bark");
             // That bite killed it: nothing left to stagger.
             if (attackTarget.HealthController != null && !attackTarget.HealthController.IsAlive) return;
@@ -807,12 +810,15 @@ namespace K9Companion
         private float nextHealthSave;
 
         private bool armourChanged;
+        // Its jacket has been hit this raid and the server hasn't been told yet (it is when the raid's over).
+        internal bool WearUnsaved => armourChanged;
 
         private void CleanupCombat()
         {
             if (armourChanged) { armourChanged = false; K9.Save(); }
             attackTarget = null; lastShooter = null;
             bitesNeeded.Clear();
+            DogKill.RaidOver();
             if (Raid == this) DogNet.DogGone();
             if (Raid == this) Raid = null;
             DogThreat.Targets.Remove(this);

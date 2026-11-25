@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.5.1
+
+Install over 1.5.0 (client and server). With Fika, everyone updates, a headless host too, as the version is the same throughout.
+
+### Fixed
+
+- **Someone the dog killed could be left standing or walking off, with no body to loot**, and shooting them did nothing. In co-op it was only so for the dog's owner, and the others saw the body. An error while the kill was being counted (a mod that expects every kill to have a weapon, for one; a bite has none) stopped the death before the body was made. The death now finishes whatever goes wrong there, and the log says where the error came from.
+- **Your dogs, their kennels and K9 progress could be lost** (server). The game sends some of the dog's requests together, when it dies for one, and the server could read the K9 file while it was half written, take it for a new player's and save that over it. The file is now written whole and one request at a time, and a file that can't be opened is left alone.
+- **Adoption papers sold out for everyone** (server). Each paper's stock of one was shared by every player on the server until Dr. Yang restocked. The limit of one is now each player's own.
+- **Playing the dog after you die, it couldn't attack far from your body**: it dropped the attack the moment it was sent. Fights are now measured from the dog.
+- **The raid could never end** if the dog stopped with an error while you were playing it. The raid now ends as your death.
+- **No dog on a Fika client** in the raid after one you'd left it out of (TAKE DOG off) ("No nearby navigation surface").
+- **A hungry dog away from you** had your hand reach out, and asked to be called over, every three seconds. It now eats from its own jacket where it is.
+- **Coming home from a raid healed the dog for the time it spent in the raid.** That time no longer counts as rest.
+- **Opening the DOG tab in a raid put back the jacket's wear.**
+- **The DOG tab showed every dog with the shepherd's health and nose** at home. It now goes by the dog's breed and how grown it is.
+
 ## 1.5.0
 
 Needs SPT 4.1.x and now **Hideout Extensions 1.3.0 or later** (client and server). Install over 1.4.0 (client and server). With Fika, everyone updates, as the version is the same throughout.

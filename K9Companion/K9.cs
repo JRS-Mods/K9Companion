@@ -98,8 +98,11 @@ namespace K9Companion
             BedUnlocked = (bool?)s["bedUnlocked"] ?? false;
             var presets = s["presets"] as JArray;
             for (int i = 0; i < Presets.Length; i++) Presets[i] = presets != null && i < presets.Count ? (string)presets[i] ?? "" : "";
-            Armour.Clear();
-            if (s["armour"] is JObject armour)
+            // Not over this raid's wear, which the server only hears of at its end (opening the DOG tab in a raid put the
+            // jacket back as it went in).
+            bool ours = Companion.Raid != null && Companion.Raid.WearUnsaved;
+            if (!ours) Armour.Clear();
+            if (!ours && s["armour"] is JObject armour)
                 foreach (var p in armour.Properties())
                     Armour[p.Name] = new Wear { Now = (float?)p.Value["now"] ?? 0, Max = (float?)p.Value["max"] ?? 0 };
             ApplyCounters(s["counters"] as JObject);
@@ -200,6 +203,9 @@ namespace K9Companion
             if (Time.unscaledTime >= nextRecoverySave) { nextRecoverySave = Time.unscaledTime + 120; NeedsStore.Save(); }
         }
         private static float nextRecoverySave;
+
+        /// <summary>Every frame with the dog out on a raid: that time isn't rest (it healed for it all at once on coming home).</summary>
+        internal static void NotResting() => lastRecovery = Time.unscaledTime;
 
         // ---- reporting --------------------------------------------------------------------------------------------
 
@@ -307,7 +313,8 @@ namespace K9Companion
         {
             var died = AccessTools.Method(typeof(Player), nameof(Player.OnBeenKilledByAggressor))
                        ?? throw new MissingMethodException(nameof(Player), nameof(Player.OnBeenKilledByAggressor));
-            harmony.Patch(died, postfix: new HarmonyMethod(typeof(K9Events), nameof(Killed)));
+            // First: another mod failing at its own count mustn't lose this one.
+            harmony.Patch(died, postfix: new HarmonyMethod(typeof(K9Events), nameof(Killed)) { priority = Priority.First });
         }
 
         private static void Killed(Player __instance, IPlayer aggressor)

@@ -41,33 +41,33 @@ public sealed class BagEmptyRequest : IRequestData { }
 [Injectable]
 public sealed class BagRouter(JsonUtil json, BagKeeper keeper) : StaticRouter(json, [
     new RouteAction<BagStartRequest>("/k9companion/bag/raid-start",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.RaidStart(sessionId, info?.BagId, info?.KitIds))),
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => keeper.RaidStart(sessionId, info?.BagId, info?.KitIds)))),
     new RouteAction<BagEmptyRequest>("/k9companion/bag/dog-died",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.DogDied(sessionId))),
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => keeper.DogDied(sessionId)))),
     new RouteAction<BagEmptyRequest>("/k9companion/bag/gear-taken",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.GearTaken(sessionId))),
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => keeper.GearTaken(sessionId)))),
     new RouteAction<BagEmptyRequest>("/k9companion/bag/dog-revived",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.DogRevived(sessionId))),
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => keeper.DogRevived(sessionId)))),
     new RouteAction<BagEmptyRequest>("/k9companion/bag/dog-extracted",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.DogExtracted(sessionId)))
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => keeper.DogExtracted(sessionId))))
 ]);
 
 [Injectable]
 public sealed class K9Router(JsonUtil json, K9Keeper k9) : StaticRouter(json, [
     new RouteAction<BagEmptyRequest>("/k9companion/k9/state",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(k9.State(sessionId))),
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => k9.State(sessionId)))),
     new RouteAction<K9Request>("/k9companion/k9/event",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(k9.Event(sessionId, info))),
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => k9.Event(sessionId, info)))),
     new RouteAction<K9Request>("/k9companion/k9/save",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(k9.Save(sessionId, info))),
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => k9.Save(sessionId, info)))),
     new RouteAction<K9Request>("/k9companion/k9/raid-start",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(k9.RaidStart(sessionId, info))),
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => k9.RaidStart(sessionId, info)))),
     new RouteAction<BagEmptyRequest>("/k9companion/k9/dog-died",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(k9.DogDied(sessionId))),
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => k9.DogDied(sessionId)))),
     new RouteAction<BagEmptyRequest>("/k9companion/k9/dog-revived",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(k9.DogRevived(sessionId))),
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => k9.DogRevived(sessionId)))),
     new RouteAction<BagEmptyRequest>("/k9companion/k9/lockers",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(k9.Lockers(sessionId)))
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => k9.Lockers(sessionId))))
 ]);
 
 [Injectable(TypePriority = OnLoadOrder.Preload + 2)]
@@ -93,10 +93,15 @@ public sealed class GameStartPatch : AbstractPatch
     // Before the game's profile check, which drops quests that no longer exist: Dr. Yang's retired quests hand their
     // progress on first (K9Keeper.MigrateQuestline).
     [PatchPrefix]
-    public static void Prefix(MongoId sessionId) => k9?.BeforeGameStart(sessionId);
+    public static void Prefix(MongoId sessionId) => K9Files.Alone(() => k9?.BeforeGameStart(sessionId));
 
     [PatchPostfix]
     public static void Postfix(MongoId sessionId)
+    {
+        lock (K9Files.Gate) Started(sessionId);
+    }
+
+    private static void Started(MongoId sessionId)
     {
         k9?.GameStarted(sessionId);
         keeper?.GameStarted(sessionId);
@@ -143,7 +148,7 @@ public sealed class QuestHandoverPatch : AbstractPatch
     [PatchPostfix]
     public static void Postfix(PmcData pmcData, MongoId sessionID, ItemEventRouterResponse __result)
     {
-        if (pmcData != null) k9?.SyncCompletion(pmcData, __result?.ProfileChanges?.GetValueOrDefault(sessionID));
+        lock (K9Files.Gate) if (pmcData != null) k9?.SyncCompletion(pmcData, __result?.ProfileChanges?.GetValueOrDefault(sessionID));
     }
 }
 
@@ -159,7 +164,7 @@ public sealed class QuestAcceptPatch : AbstractPatch
     [PatchPostfix]
     public static void Postfix(PmcData pmcData, MongoId sessionID, ItemEventRouterResponse __result)
     {
-        if (pmcData != null) k9?.QuestAccepted(pmcData, __result?.ProfileChanges?.GetValueOrDefault(sessionID));
+        lock (K9Files.Gate) if (pmcData != null) k9?.QuestAccepted(pmcData, __result?.ProfileChanges?.GetValueOrDefault(sessionID));
     }
 }
 
@@ -175,7 +180,7 @@ public sealed class QuestCompletePatch : AbstractPatch
     public static void Postfix(PmcData pmcData, CompleteQuestRequestData request, MongoId sessionId, ItemEventRouterResponse __result)
     {
         if (pmcData?.Quests?.Any(q => q.QId == request.QuestId && q.Status == QuestStatusEnum.Success) == true)
-            k9?.QuestCompleted(sessionId, pmcData, request.QuestId, __result);
+            lock (K9Files.Gate) k9?.QuestCompleted(sessionId, pmcData, request.QuestId, __result);
     }
 }
 
@@ -193,7 +198,7 @@ public sealed class RaidEndPatch : AbstractPatch
     public static void Prefix(MongoId sessionId, SptProfile fullServerProfile)
     {
         var pmc = fullServerProfile?.CharacterData?.PmcData;
-        if (pmc != null) keeper?.BeforeRaidEnd(sessionId, pmc);
+        lock (K9Files.Gate) if (pmc != null) keeper?.BeforeRaidEnd(sessionId, pmc);
     }
 
     [PatchPostfix]
@@ -201,8 +206,11 @@ public sealed class RaidEndPatch : AbstractPatch
     {
         var pmc = fullServerProfile?.CharacterData?.PmcData;
         if (pmc == null) return;
-        keeper?.RaidEnded(sessionId, pmc, isDead, isTransfer, request, locationName);
-        k9?.RaidEnded(pmc, isDead, isTransfer, request);
+        lock (K9Files.Gate)
+        {
+            keeper?.RaidEnded(sessionId, pmc, isDead, isTransfer, request, locationName);
+            k9?.RaidEnded(pmc, isDead, isTransfer, request);
+        }
     }
 }
 
@@ -416,7 +424,7 @@ public sealed class SettingsRouter(JsonUtil json, DogSettingsFile settings, VetK
     new RouteAction<BagEmptyRequest>("/k9companion/settings",
         (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(settings.Read())),
     new RouteAction<VetUseRequest>("/k9companion/vet/use",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(vet.Use(sessionId, info)))
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => vet.Use(sessionId, info))))
 ]);
 
 // Dr. Yang's pet cards, per player: a breed's card is off his shelf once you have a dog of that breed or its card, so
@@ -437,7 +445,7 @@ public sealed class CardShelfPatch : AbstractPatch
         try
         {
             PmcData? pmc = profiles.GetPmcProfile(sessionId);
-            HashSet<string> taken = Pack.Taken(pmc, store.Load(pmc));
+            HashSet<string> taken = K9Files.Alone(() => Pack.Taken(pmc, store.Load(pmc)));
             var gone = Pack.Cards.Where(c => taken.Contains(c.Breed)).Select(c => c.Offer).ToHashSet();
             if (gone.Count == 0) return;
             __result.Items.RemoveAll(i => gone.Contains(i.Id));

@@ -519,6 +519,27 @@ public sealed class ArmourRecord
 }
 
 /// <summary>
+/// The server answers requests side by side, and the game sends some of the dog's together (its death, to the K9 state and
+/// the jacket record): one could read a file the other was half way through writing, take it for empty, and write a new
+/// profile's over it, every dog gone. So the mod's own work goes one piece at a time (Gate), and a file is written
+/// beside itself and then swapped in, whole.
+/// </summary>
+public static class K9Files
+{
+    public static readonly object Gate = new();
+
+    public static T Alone<T>(Func<T> work) { lock (Gate) return work(); }
+    public static void Alone(Action work) { lock (Gate) work(); }
+
+    public static void Write(string path, string text)
+    {
+        string temporary = path + ".tmp";
+        System.IO.File.WriteAllText(temporary, text);
+        System.IO.File.Move(temporary, path, true);
+    }
+}
+
+/// <summary>
 /// Reads and writes K9State. A profile without a file is migrated once: it counts as an existing owner if it already
 /// has any of the dog's data (gear holder, saddlebag record, needs file), so nobody who had the dog loses it.
 /// </summary>
@@ -534,7 +555,18 @@ public sealed class K9Store(ISptLogger<K9Store> logger, FileUtil files, JsonUtil
         if (pmc?.Inventory?.Items == null || pmc.Id == null) return null;
         string path = PathFor(pmc);
         K9State? state = null;
-        try { if (files.FileExists(path)) state = json.Deserialize<K9State>(files.ReadFile(path)); }
+        try
+        {
+            if (files.FileExists(path))
+                state = json.Deserialize<K9State>(files.ReadFile(path)) ?? throw new System.IO.InvalidDataException("the file is empty");
+        }
+        // Not to be read just now (held by a backup or a virus scanner): never mistaken for a profile without one, which
+        // would start it over and write that down.
+        catch (Exception e) when ((e is System.IO.IOException && e is not System.IO.InvalidDataException) || e is UnauthorizedAccessException)
+        {
+            logger.Error($"[K9Companion] Couldn't open {path} (left as it is; tried again next time): {e.Message}");
+            return null;
+        }
         catch (Exception e) { logger.Error($"[K9Companion] Couldn't read {path} (keeping a copy, starting from your existing data): {e.Message}"); Backup(path); }
         if (state == null)
         {
@@ -553,7 +585,11 @@ public sealed class K9Store(ISptLogger<K9Store> logger, FileUtil files, JsonUtil
             if (why != null)
             {
                 StartOver(pmc, why);
-                return Load(pmc);
+                if (!files.FileExists(path)) return Load(pmc);
+                // It couldn't be set aside: started over in place (loading it again would come straight back here).
+                state = new K9State { Version = K9State.CurrentVersion, Character = character };
+                Save(pmc, state);
+                return state;
             }
             state.Character = character;
             Save(pmc, state);
@@ -623,7 +659,7 @@ public sealed class K9Store(ISptLogger<K9Store> logger, FileUtil files, JsonUtil
     {
         string folder = Folder(pmc);
         if (!files.DirectoryExists(folder)) files.CreateDirectory(folder);
-        files.WriteFile(PathFor(pmc), json.Serialize(state, true)!);
+        K9Files.Write(PathFor(pmc), json.Serialize(state, true)!);
     }
 
     private void Backup(string path)
@@ -761,7 +797,7 @@ public sealed class KennelImprovePatch : AbstractPatch
         if (index < 0 || store == null || outputs == null || responses == null || inventory == null || payments == null) return true;
         Kennel.Level level = Kennel.Levels[index];
         ItemEventRouterResponse output = outputs.GetOutput(sessionId);
-        string? locked = Kennel.Locked(pmcData, level.Number, store.Owned(pmcData));
+        string? locked = Kennel.Locked(pmcData, level.Number, K9Files.Alone(() => store.Owned(pmcData)));
         if (locked != null)
         {
             log?.Warning($"[K9Companion] Refused to start the kennel's {level.Name}: {locked}.");
@@ -877,7 +913,7 @@ public sealed class NeedsKeeper(ISptLogger<NeedsKeeper> logger, ProfileHelper pr
         if (path == null || data == null) return "{\"ok\":false}";
         string folder = System.IO.Path.GetDirectoryName(path)!;
         if (!files.DirectoryExists(folder)) files.CreateDirectory(folder);
-        files.WriteFile(path, json.Serialize(data.Validated(), true)!);
+        K9Files.Write(path, json.Serialize(data.Validated(), true)!);
         return "{\"ok\":true}";
     }
 }
@@ -885,9 +921,9 @@ public sealed class NeedsKeeper(ISptLogger<NeedsKeeper> logger, ProfileHelper pr
 [Injectable]
 public sealed class NeedsRouter(JsonUtil json, NeedsKeeper keeper) : StaticRouter(json, [
     new RouteAction<BagEmptyRequest>("/k9companion/needs/load",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.Load(sessionId))),
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => keeper.Load(sessionId)))),
     new RouteAction<NeedsData>("/k9companion/needs/save",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(keeper.Save(sessionId, info)))
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => keeper.Save(sessionId, info))))
 ]);
 
 /// <summary>

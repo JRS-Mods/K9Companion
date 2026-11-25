@@ -544,7 +544,7 @@ public sealed class BagKeeper(ISptLogger<BagKeeper> logger, ProfileHelper profil
         string path = RecordPath(pmc);
         string folder = System.IO.Path.GetDirectoryName(path)!;
         if (!files.DirectoryExists(folder)) files.CreateDirectory(folder);
-        files.WriteFile(path, json.Serialize(record, true)!);
+        K9Files.Write(path, json.Serialize(record, true)!);
     }
 }
 

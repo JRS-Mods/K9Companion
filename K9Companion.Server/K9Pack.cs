@@ -353,7 +353,7 @@ public sealed class PackKeeper(ISptLogger<PackKeeper> logger, ProfileHelper prof
             }
         }
         catch (Exception e) { logger.Warning($"[K9Companion] A dog's needs couldn't be read, keeping them as they were: {e.Message}"); }
-        files.WriteFile(NeedsPath(pmc), text);
+        K9Files.Write(NeedsPath(pmc), text);
     }
 
     private string Reply(PmcData pmc, K9State state, string? outHolder, string? inHolder)
@@ -420,15 +420,15 @@ public sealed class PackKeeper(ISptLogger<PackKeeper> logger, ProfileHelper prof
 [Injectable]
 public sealed class PackRouter(JsonUtil json, PackKeeper pack) : StaticRouter(json, [
     new RouteAction<PackRequest>("/k9companion/pack/adopt",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(pack.Adopt(sessionId, info))),
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => pack.Adopt(sessionId, info)))),
     new RouteAction<PackRequest>("/k9companion/pack/release",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(pack.Release(sessionId, info))),
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => pack.Release(sessionId, info)))),
     new RouteAction<PackRequest>("/k9companion/pack/rename",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(pack.Rename(sessionId, info))),
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => pack.Rename(sessionId, info)))),
     new RouteAction<PackRequest>("/k9companion/pack/home",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(pack.Home(sessionId, info))),
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => pack.Home(sessionId, info)))),
     new RouteAction<PackRequest>("/k9companion/pack/switch",
-        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(pack.Switch(sessionId, info)))
+        (url, info, sessionId, output, cancellationToken) => new ValueTask<string>(K9Files.Alone(() => pack.Switch(sessionId, info))))
 ]);
 
 /// <summary>The pet cards (Dr. Yang, from Trust Is Earned) and the roster holder template.</summary>
@@ -491,7 +491,9 @@ public sealed class PackItems(CustomItemService items, TemplateTable templates, 
                 yang.Assort.Items.RemoveAll(i => i.Id == card.Offer);
                 yang.Assort.Items.Add(new Item { Id = card.Offer, Template = card.Template, ParentId = "hideout", SlotId = "hideout",
                                                 // One at a time: a breed's card goes off the shelf once you have it or its dog (CardShelf).
-                                                Upd = new Upd { UnlimitedCount = false, StackObjectsCount = 1, BuyRestrictionMax = 1, BuyRestrictionCurrent = 0 } });
+                                                // The stock is the whole server's (it was 1: with Fika the first to buy
+                                                // left none for anyone else till the restock); the limit of one is each player's own.
+                                                Upd = new Upd { UnlimitedCount = false, StackObjectsCount = 1000, BuyRestrictionMax = 1, BuyRestrictionCurrent = 0 } });
                 yang.Assort.BarterScheme[card.Offer] = [[new BarterScheme { Count = card.Price, Template = K9Ids.Roubles }]];
                 yang.Assort.LoyalLevelItems[card.Offer] = card.Level;
                 if (success != null) success[card.Offer] = K9Ids.Quest(K9Ids.TrustIsEarned);

@@ -10,7 +10,7 @@ public record ModMetadata : IModMetadata
     public string Name { get; init; } = "K9Companion";
     public string Author { get; init; } = "JRS";
     public List<string>? Contributors { get; init; }
-    public Version Version { get; init; } = new("1.5.0");
+    public Version Version { get; init; } = new("1.5.1");
     public Range SptVersion { get; init; } = new("~4.1.0");
     public List<string>? Incompatibilities { get; init; }
     // The dogs live in a room of Hideout Extensions' (hideoutextensions/k9_kennels.json).

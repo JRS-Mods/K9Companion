@@ -321,7 +321,7 @@ namespace K9Companion
             bool inRaid = GamePlayerOwner.MyPlayer != null && dog != null && !(GamePlayerOwner.MyPlayer is HideoutPlayer);
             DogNeeds needs = NeedsStore.Current;
             // In a raid the live dog; at home the health it came back with (wounds carry over, see K9.Recover).
-            float max = inRaid ? dog.HealthMax : Plugin.MaxHealth;
+            float max = inRaid ? dog.HealthMax : Plugin.MaxHealth * Pack.ActiveBreed.Health * Growth.ActiveStrength;
             float carried = Plugin.CarryOverInjuries.Value && needs != null ? needs.Health / 100f : 1f;
             float now = inRaid ? (dog.IsDead ? 0 : dog.HealthNow) : max * carried;
             float share = max > 0 ? now / max : 0;
@@ -686,7 +686,7 @@ namespace K9Companion
             facts[2].text = Lang.T(level >= 3 ? "kits go 50% further" : "none yet");
             facts[3].text = Lang.T(BedNames[Mathf.Clamp(K9.Bed, 0, 2)]);
             facts[4].text = Lang.T(K9.Training + " of 3");
-            facts[5].text = (10 + 2 * Mathf.Clamp(K9.Training, 0, 3)) + " m";
+            facts[5].text = SmellsWithin(K9.Training) + " m";
             if (level >= 3) { kennelNext.text = ""; return; }
             string next = K9.KennelNames[level], building = Building(level + 1), held = KennelUi.Locked(level + 1, profile);
             kennelNext.text = Lang.T(building != null ? $"Building the {next}: {building}" : held != null ? $"Next: {next}  ·  {held}" : $"Next: {next}  ·  ready to build in your Rest Space");
@@ -880,13 +880,16 @@ namespace K9Companion
             return K9.Training >= 3 ? "fully trained" : null;
         }
 
+        // As far as the dog smells loot (Companion.TickSniff): its training, and its breed's nose.
+        private static int SmellsWithin(int training) => Mathf.RoundToInt(10 + 2 * Mathf.Clamp(training, 0, 3) + Pack.ActiveBreed.ScentBonus);
+
         // One K9 training kit (Dr. Yang, LL2) per level.
         private void Train()
         {
             Item kit = DogPantry.AtHome(profile).FirstOrDefault(i => i.TemplateId.ToString() == "6a5d0c0c4fb9a3c5e1d60015");
             if (kit == null) { Status("Training takes a K9 training kit (Dr. Yang, loyalty level 2)."); return; }
             Use(kit, () => { K9.Training++; K9.Save(); },
-                Plugin.DogName.Value + " trained with the {item}: training level " + (K9.Training + 1) + ", smells valuables up to " + (10 + 2 * (K9.Training + 1)) + " m away.");
+                Plugin.DogName.Value + " trained with the {item}: training level " + (K9.Training + 1) + ", smells valuables up to " + SmellsWithin(K9.Training + 1) + " m away.");
         }
 
         private void OpenLocker(string template)

@@ -21,7 +21,7 @@ namespace K9Companion
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id = "jrs.k9companion";
-        public const string Version = "1.5.0";
+        public const string Version = "1.5.1";
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> Active, CombatMode, SurvivalNeeds, AutoFeedInHideout, CarryOverInjuries;
         internal static ConfigEntry<DogApproach> ApproachMode;
@@ -248,6 +248,7 @@ namespace K9Companion
             PatchFeature("NPC targeting", DogThreat.Patch);
             PatchFeature("controlling the dog after you die", DogControlPatches.Patch);
             PatchFeature("the dog hearing gunfire at you", DogThreat.PatchGunfire);
+            PatchFeature("the bodies of those the dog kills", DogKill.Patch);
             PatchFeature("K9 quest events (kills with the dog)", K9Events.Patch);
             PatchFeature("K9 Kennel in the Rest Space", KennelUi.Patch);
             PatchFeature("K9 Kennel icon hover", KennelIcon.Patch);
@@ -375,11 +376,13 @@ namespace K9Companion
             {
                 // A Fika headless host has no player of its own to follow (other players' dogs still show up through DogNet).
                 if (DogNet.Headless) return;
-                if (!Active.Value || __instance == null ||
-                    (string.Equals(__instance.LocationId, "hideout", StringComparison.OrdinalIgnoreCase) || __instance.MainPlayer is HideoutPlayer) ||
-                    __instance.GetComponent<Companion>() != null) return;
-                bool deployed = DogBag.Deployed ?? K9.NotDeployable(__instance.MainPlayer?.Side == EPlayerSide.Savage) == null;
+                if (__instance == null || string.Equals(__instance.LocationId, "hideout", StringComparison.OrdinalIgnoreCase) || __instance.MainPlayer is HideoutPlayer) return;
+                // For this raid only, dog or no dog: left over from a raid without one, it kept the next raid's navmesh from
+                // loading on a Fika client (DogNavMesh), and the dog had nowhere to stand.
+                bool? decided = DogBag.Deployed;
                 DogBag.Deployed = null;
+                if (!Active.Value || __instance.GetComponent<Companion>() != null) return;
+                bool deployed = decided ?? K9.NotDeployable(__instance.MainPlayer?.Side == EPlayerSide.Savage) == null;
                 // Fika only knows who's in the raid for certain now: a host decides before everyone has joined. Any jacket
                 // already on its way stays with your gear: back in the stash when you get out, as usual.
                 if (deployed && SoloOnly && DogNet.InGroup)
@@ -409,7 +412,7 @@ namespace K9Companion
             }
             K9.Tick();
             KennelResidents.Tick();
-            if (Companion.Raid == null) K9.Recover();
+            if (Companion.Raid == null) K9.Recover(); else K9.NotResting();
             if (!Active.Value || !Hideout.Value || Time.unscaledTime < nextHideout) return;
             nextHideout = Time.unscaledTime + 2;
             // Only in the hideout, and only until its dog is there: what follows searches the whole scene, which was a stall

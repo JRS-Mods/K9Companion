@@ -142,6 +142,8 @@ namespace K9Companion
             {
                 failed = true;
                 Plugin.Log.LogError("Companion stopped safely: " + e);
+                // You were playing it: the raid's end waits for the dog, and would have waited for good.
+                EndControl("the dog stopped working");
                 Cleanup();
             }
         }

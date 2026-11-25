@@ -22,7 +22,7 @@ namespace K9Companion
         private const string MealClip = "Stand_02";
         private const float MealFrom = 95f / 501f, MealTo = 205f / 501f, MealSpeed = 1.1f, HandReach = 3f, BowlReach = 1.2f;
 
-        private enum MealSource { None, Dish, Hand }
+        private enum MealSource { None, Dish, Hand, Jacket }
 
         private DogNeeds needs;
         private MealSource meal;
@@ -71,8 +71,8 @@ namespace K9Companion
             else if (command == Command.Follow || command == Command.Stay || command == Command.Sit)
             {
                 // In a raid the dog only ever helps itself from its own jacket, never from your gear.
-                if (needs.Hunger < DogNeeds.EatsFromBagBelow) { Item food = DogPantry.Best(owner, false, true, 100 - needs.Hunger, true); if (food != null) StartMeal(MealSource.Hand, true, food); }
-                else if (needs.Thirst < DogNeeds.EatsFromBagBelow) { Item water = DogPantry.Best(owner, false, false, 100 - needs.Thirst, true); if (water != null) StartMeal(MealSource.Hand, false, water); }
+                if (needs.Hunger < DogNeeds.EatsFromBagBelow) { Item food = DogPantry.Best(owner, false, true, 100 - needs.Hunger, true); if (food != null) StartMeal(MealSource.Jacket, true, food); }
+                else if (needs.Thirst < DogNeeds.EatsFromBagBelow) { Item water = DogPantry.Best(owner, false, false, 100 - needs.Thirst, true); if (water != null) StartMeal(MealSource.Jacket, false, water); }
             }
         }
 
@@ -193,6 +193,9 @@ namespace K9Companion
             get
             {
                 if (meal == MealSource.Dish) return mealFood ? decor?.FoodBowl : decor?.WaterBowl;
+                // Out of its own jacket, right where it is. (It took your hand for it: with you further off it asked to be
+                // called over, and your hand went out, every three seconds.)
+                if (meal == MealSource.Jacket) return dog.transform.position + Quaternion.Euler(0, yaw, 0) * Vector3.forward * .5f;
                 Player owner = CurrentPlayer;
                 return meal == MealSource.Hand && owner != null ? owner.Transform.position : (Vector3?)null;
             }
